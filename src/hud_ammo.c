@@ -1,34 +1,53 @@
 // src/hud_ammo.c
 #include "types.h"
 
-// Estructura interna estimada para los componentes visuales del HUD de munición
-typedef struct {
-    f32 posX;
-    f32 posY;
-    f32 scaleX;
-    f32 scaleY;
-    u32 colorRGBA;
-    const char* assetName;
-} HudAmmoWidget;
+// Definición funcional de la función interna que descubriste vinculando strings
+void hud_register_widget_asset(void* widget_struct, const char* asset_name, long param_3, ...);
+void* hud_allocate_or_get_node(int* source, ...);
+u32 hud_initialize_subsystem(u32 size, long address);
 
 /**
  * @brief Inicializa o actualiza el estado y coordenadas de la interfaz de munición.
  * Dirección original en Ghidra: 0x0034D490 (PAL)
- *
- * @param p_hudState Puntero al estado global del HUD (param_1 / registro a0)
- * @param p_ammoData Puntero a los datos de munición del arma actual (param_2 / registro a1)
  */
-void hud_ammo_update_or_init(void* p_hudState, s32 p_ammoData, long param_3) {
-    // Las variables 'extraout' de Ghidra representan el coprocesador vectorial de la PS2 (VU0/VU1)
-    // o registros flotantes cargando matrices de transformación para los elementos visuales.
+void hud_ammo_update_or_init(u32* p_hudState, s32 p_ammoData, long param_3) {
 
-    // El ensamblador muestra instrucciones 'swc1' (Store Word Coprocessor 1), 
-    // lo que significa que el juego está guardando valores de punto flotante (f32) en el Stack.
+	// Las líneas 192 y 193 de Ghidra limpian flags de estado específicos en el HUD
+	p_hudState[0x567] = 0;
+	p_hudState[0x568] = 0;
 
-    // Ejemplos de offsets de datos matemáticos detectados en el ensamblador (swc1 $f25, 0x128($sp)):
-    // Estos corresponden a las posiciones de renderizado o transformaciones de las strings:
-    // "BackAmmo", "OutlineAmmo", "AmmoText", "AmmoIcon"
+	// --- REGISTRO DE WIDGETS VISUALES DEL HUD ---
 
-    // TODO: Conectar con el depurador de PCSX2 para interceptar qué valores flotantes 
-    // específicos se almacenan en los desplazamientos 0x128, 0x120 y 0x118 del Stack.
+	// Línea 195: Inicializa el fondo del HUD usando la string "BackAmmo"
+	hud_register_widget_asset(p_hudState, (const char*)0x001ae6d8, param_3);
+
+	// Línea 202: Inicializa el borde usando "OutlineAmmo"
+	// piStack_14c corresponde a un desplazamiento interno en el stack para este componente
+	u32* widget_outline = p_hudState + 0x13;
+	hud_register_widget_asset(widget_outline, (const char*)0x001ae6e8, param_3);
+
+	// Línea 206: Inicializa el tercer componente (probablemente texto o icono)
+	u32* widget_third = p_hudState + 0x26;
+	hud_register_widget_asset(widget_third, (const char*)0x001ae6f8, param_3);
+
+
+	// --- LÓGICA DE CONDICIÓN DE PARÁMETROS (Línea 248) ---
+	// Si el contexto externo (param_3) es válido, inicializa sus matrices/vectores a 0
+	if (param_3 != 0) {
+		// FUN_00338b98 obtiene el nodo o componente de transformación de coordenadas
+		int* node_ptr = (int*)hud_allocate_or_get_node((int*)param_3);
+
+		// FUN_00338b00 reserva espacio de memoria para almacenar datos dinámicos (4 words)
+		u32 storage_address = hud_initialize_subsystem(0x10, (long)node_ptr);
+		u32* vector_data = (u32*)storage_address;
+
+		// Asigna el bloque inicializado al estado global del HUD
+		p_hudState[0x201] = (u32)vector_data;
+
+		// Inicialización a cero de un Vector4 o estructura matemática de transformación
+		vector_data[0] = 0; // X o Red
+		vector_data[1] = 0; // Y o Green
+		vector_data[2] = 0; // Z o Blue
+		vector_data[3] = 0; // W o Alpha
+	}
 }
