@@ -1,36 +1,34 @@
 // src/hud_ammo.c
 #include "types.h"
 
-// Definición estimada de la estructura de un elemento del HUD
+// Estructura interna estimada para los componentes visuales del HUD de munición
 typedef struct {
-	const char* label;
-	u32 flags;
-	s32 posX;
-	s32 posY;
-} HudElement;
+    f32 posX;
+    f32 posY;
+    f32 scaleX;
+    f32 scaleY;
+    u32 colorRGBA;
+    const char* assetName;
+} HudAmmoWidget;
 
 /**
- * Función encargada de inicializar los componentes lógicos de la munición en el HUD.
- * Dirección aproximada en Ghidra: 0x0034D494 (Inicio del bloque visualizado)
+ * @brief Inicializa o actualiza el estado y coordenadas de la interfaz de munición.
+ * Dirección original en Ghidra: 0x0034D490 (PAL)
+ *
+ * @param p_hudState Puntero al estado global del HUD (param_1 / registro a0)
+ * @param p_ammoData Puntero a los datos de munición del arma actual (param_2 / registro a1)
  */
-void hud_init_ammo_components(void* param_1, void* param_2) {
-	// El descompilador de Ghidra muestra que se realizan múltiples operaciones
-	// de cálculo de direcciones (addiu) y almacenamiento en el Stack (sw/sd).
+void hud_ammo_update_or_init(void* p_hudState, s32 p_ammoData, long param_3) {
+    // Las variables 'extraout' de Ghidra representan el coprocesador vectorial de la PS2 (VU0/VU1)
+    // o registros flotantes cargando matrices de transformación para los elementos visuales.
 
-	// Aquí comenzaremos a recrear la lógica funcional de asignación de los elementos:
-	HudElement back_ammo;
-	HudElement outline_ammo;
-	HudElement ammo_text;
-	HudElement ammo_icon;
+    // El ensamblador muestra instrucciones 'swc1' (Store Word Coprocessor 1), 
+    // lo que significa que el juego está guardando valores de punto flotante (f32) en el Stack.
 
-	// En 0x0034d4d4 vemos que se referencia directamente la string "BackAmmo" (0x001ae6d8)
-	back_ammo.label = (const char*)0x001ae6d8; // "BackAmmo"
+    // Ejemplos de offsets de datos matemáticos detectados en el ensamblador (swc1 $f25, 0x128($sp)):
+    // Estos corresponden a las posiciones de renderizado o transformaciones de las strings:
+    // "BackAmmo", "OutlineAmmo", "AmmoText", "AmmoIcon"
 
-	// Siguiendo la lógica de las strings consecutivas detectadas por Ghidra:
-	outline_ammo.label = (const char*)0x001ae6e8; // "OutlineAmmo"
-	ammo_text.label = (const char*)0x001ae700; // "AmmoText"
-	ammo_icon.label = (const char*)0x001ae710; // "AmmoIcon"
-
-	// TODO: Mapear los offsets aritméticos (0x158, 0x194, etc.) para identificar 
-	// si corresponden a las coordenadas en pantalla de cada elemento gráfico.
+    // TODO: Conectar con el depurador de PCSX2 para interceptar qué valores flotantes 
+    // específicos se almacenan en los desplazamientos 0x128, 0x120 y 0x118 del Stack.
 }
