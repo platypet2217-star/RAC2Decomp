@@ -51,3 +51,58 @@ void hud_ammo_update_or_init(u32* p_hudState, s32 p_ammoData, long param_3) {
 		vector_data[3] = 0; // W o Alpha
 	}
 }
+
+/**
+ * @brief Busca un identificador específico dentro de una estructura de tabla indexada.
+ * Operación matemática en un arreglo con saltos de 8 bytes (Estructura de pares Clave/Valor).
+ * Dirección original en Ghidra: 0x00338AA8 (PAL)
+ *
+ * @param table_ptr Puntero a la estructura de la tabla base.
+ * @param target_id ID o clave que estamos buscando.
+ * @return s32 El valor asociado al ID encontrado, o 0 si no existe/se sale de los límites.
+ */
+s32 game_lookup_id_in_table(u8* table_ptr, s32 target_id) {
+	s32 index = 0;
+
+	// El offset +0x18 almacena la cantidad máxima de elementos válidos en la tabla
+	s32 total_elements = *(s32*)(table_ptr + 0x18);
+
+	if (0 < total_elements) {
+		index = 1;
+
+		// Optimización del motor: Comprobar directamente el primer elemento (+0x1c)
+		if (*(s32*)(table_ptr + 0x1c) == target_id) {
+			index = *(s32*)(table_ptr + 0x20); // Devuelve el valor asociado en +0x20
+		}
+		else {
+			// Bucle de búsqueda lineal (do-while)
+			do {
+				if (*(s32*)(table_ptr + 0x18) <= index) {
+					return 0; // Fuera de los límites de la tabla, no encontrado
+				}
+
+				// Estructura de par Clave-Valor de 8 bytes: 4 bytes para ID, 4 bytes para Datos
+				s32* pair_ptr = (s32*)(index * 8 + (table_ptr + 0x1c));
+				index++;
+
+				if (*pair_ptr == target_id) {
+					return pair_ptr[1]; // Devuelve el valor contiguo en memoria
+				}
+			} while (1);
+		}
+	}
+
+	return index;
+}
+
+/**
+ * @brief Obtiene un valor de configuración mediante búsqueda e inicializa el campo del HUD.
+ * Dirección original en Ghidra: 0x00338070 (PAL)
+ */
+void hud_set_state_from_lookup(u8* p_hudState, u8* table_ptr, s32 target_id) {
+	// Realiza la búsqueda en la tabla lógica
+	s32 result_value = game_lookup_id_in_table(table_ptr, target_id);
+
+	// Almacena el resultado en el offset de configuración +0x40 del componente del HUD
+	*(s32*)(p_hudState + 0x40) = result_value;
+}
