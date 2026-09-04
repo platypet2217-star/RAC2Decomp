@@ -4,55 +4,90 @@
 // Definición funcional de la función interna que descubriste vinculando strings
 void hud_register_widget_asset(void* widget_struct, const char* asset_name, long param_3, ...);
 void* hud_allocate_or_get_node(int* source, ...);
+void* ee_memset(void* dest, u8 value, u32 size);
 u32 hud_initialize_subsystem(u32 size, long address);
 
+// Declaración externa de la función constructora que limpia las matrices
+void hud_clear_widget_matrices(u32* param_1, const char* text_ptr, long param_3, ...);
+
 /**
- * @brief Inicializa o actualiza el estado y coordenadas de la interfaz de munición.
+ * @brief Enlaza el recurso tipográfico y configura las propiedades visuales del texto del HUD.
+ * Establece fuentes, escalas iniciales (1.0f), espaciado (0.7f) y banderas de renderizado.
+ * Dirección original en Ghidra: 0x00338688 (PAL)
+ */
+void hud_link_widget_text(u32* p_widget, const char* text_resource, long param_3,
+	long p4, long p5, long p6, long p7, long p8) {
+
+	// 1. Llama a la subrutina interna para limpiar las matrices de transformación
+	hud_clear_widget_matrices(p_widget, text_resource, param_3, p4, p5, p6, p7, p8);
+
+	// 2. Asigna el puntero del recurso de la fuente tipográfica global (offset 0xd)
+	p_widget[0xD] = 0x002638D0;
+
+	// 3. Configura las escalas iniciales de renderizado X e Y a 1.0f (0x3f800000)
+	f32* p_scale = (f32*)p_widget[1];
+	p_scale[0] = 1.0f; // Escala X
+	p_scale[1] = 1.0f; // Escala Y
+
+	// 4. Configura propiedades de formato y espaciado (0x3f333333 = 0.7f)
+	p_widget[0xE] = 1;          // Flag de inicialización o visibilidad activa
+	p_widget[0x10] = 0;          // Offset de desplazamiento de renderizado
+	p_widget[0x14] = 0x3f333333; // Espaciado entre caracteres / Kerning (0.7f)
+	p_widget[0x11] = 1;          // Modo de alineación (ej. Centrado)
+	p_widget[0x13] = 0x200;      // Flags de renderizado adicionales (ej. Activar Sombra)
+	p_widget[0x12] = 0;          // Rotación o inclinación del texto
+}
+
+
+/**
+ * @brief Inicializa los componentes principales de la interfaz (HUD Master Init).
  * Dirección original en Ghidra: 0x0034D490 (PAL)
  */
-void hud_ammo_update_or_init(u32* p_hudState, s32 p_ammoData, long param_3) {
+void hud_initialize_main_widgets(u32* p_hudState, s32 p_ammoData, long param_3) {
 
-	// Las líneas 192 y 193 de Ghidra limpian flags de estado específicos en el HUD
+	// Líneas 192-193: Flags de estado a cero
 	p_hudState[0x567] = 0;
 	p_hudState[0x568] = 0;
 
-	// --- REGISTRO DE WIDGETS VISUALES DEL HUD ---
-
-	// Línea 195: Inicializa el fondo del HUD usando la string "BackAmmo"
+	// --- SECCIÓN 1: HUD MUNICIÓN Y EXPERIENCIA DE ARMA ---
+	// Línea 195: Fondo del HUD de munición ("BackAmmo" - 0x001ae6d8)
 	hud_register_widget_asset(p_hudState, (const char*)0x001ae6d8, param_3);
 
-	// Línea 202: Inicializa el borde usando "OutlineAmmo"
-	u32* widget_outline = p_hudState + 0x13;
-	hud_register_widget_asset(widget_outline, (const char*)0x001ae6e8, param_3);
+	// Línea 202: Silueta del indicador de balas ("OutlineAmmo" - 0x001ae6e8)
+	u32* widget_outline_ammo = p_hudState + 0x13;
+	hud_register_widget_asset(widget_outline_ammo, (const char*)0x001ae6e8, param_3);
 
-	// Línea 206: Inicializa el tercer componente (probablemente texto)
-	u32* widget_third = p_hudState + 0x26;
-	hud_register_widget_asset(widget_third, (const char*)0x001ae6f8, param_3);
+	// Línea 206: Barra de experiencia del arma ("WeaXP" - 0x001ae6f8)
+	u32* widget_weapon_xp = p_hudState + 0x26;
+	hud_register_widget_asset(widget_weapon_xp, (const char*)0x001ae6f8, param_3);
 
-	// Línea 212: Primer borrado de memoria detectado (Limpia 24 bytes en el offset 0x39)
+	// Línea 212: Limpieza de bloques de memoria de armas
 	ee_memset((u8*)p_hudState + 0x39, 0, 0x18);
 
-	// [Aquí iría el Widget 3 ("AmmoIcon") que se inicializa en las líneas 219-222]
-	// [Aquí iría el Widget 4 que se inicializa en las líneas 225-229]
-	// [Aquí iría el Widget 5 que se inicializa en las líneas 230-234]
+	// --- NUEVO BLOQUE IDENTIFICADO (Líneas 210-213) ---
+	// Configura propiedades matemáticas y busca el estado del componente de texto
+	u32* widget_ammo_text = p_hudState + 0x40; // piVar14 corresponde al offset +0x40
+	math_set_vector4(0x41200000, 0x41200000, 0, 0, widget_ammo_text);
+	hud_set_state_from_lookup((u8*)widget_ammo_text, (u8*)iVar17, 1);
 
-	// Línea 235: Segundo borrado de memoria detectado (Limpia 24 bytes en el offset 0x8b)
+	// Línea 213: Enlaza el recurso de texto "AmmoText" al componente visual del HUD
+	hud_link_widget_text(widget_ammo_text, (const char*)0x001ae700, 1);
+
+	// --- SECCIÓN 2: HUD CONTADOR DE GUITONES (BOLTS) ---
+	// Línea 226: Contenedor trasero de guitones ("BackBolt" - 0x001ae720)
+	u32* widget_back_bolt = p_hudState + 0x65;
+	hud_register_widget_asset(widget_back_bolt, (const char*)0x001ae720, param_3);
+
+	// Línea 230: Borde exterior del marcador de guitones ("OutlineBolt" - 0x001ae730)
+	u32* widget_outline_bolt = p_hudState + 0x78;
+	hud_register_widget_asset(widget_outline_bolt, (const char*)0x001ae730, param_3);
+
+	// Línea 236: Texto numérico para la cantidad total ("BoltText" - 0x001ae740)
+	u32* widget_bolt_text = p_hudState + 0x92;
+	hud_register_widget_asset(widget_bolt_text, (const char*)0x001ae740, param_3);
+
+	// Línea 235: Limpieza de bloques de memoria de economía
 	ee_memset((u8*)p_hudState + 0x8b, 0, 0x18);
-
-
-	// --- LÓGICA DE CONDICIÓN DE PARÁMETROS (Línea 248) ---
-	if (param_3 != 0) {
-		int* node_ptr = (int*)hud_allocate_or_get_node((int*)param_3);
-		u32 storage_address = hud_initialize_subsystem(0x10, (long)node_ptr);
-		u32* vector_data = (u32*)storage_address;
-
-		p_hudState[0x201] = (u32)vector_data;
-
-		vector_data[0] = 0;
-		vector_data[1] = 0;
-		vector_data[2] = 0;
-		vector_data[3] = 0;
-	}
 }
 
 /**
@@ -153,4 +188,42 @@ void* ee_memset(void* dest, u8 value, u32 size) {
 	}
 
 	return dest;
+}
+
+/**
+ * @brief Controla la visibilidad o factor de escala de un componente del HUD.
+ * Escribe 1.0f (0x3f800000) o 0.0f en la propiedad de transformación del elemento.
+ * Dirección original en Ghidra: 0x00337B48 (PAL)
+ *
+ * @param p_widget Destino del componente visual (param_1 / registro a0)
+ * @param enable Estado booleano para activar o desactivar (param_2 / registro a1)
+ */
+void hud_set_widget_visibility(u32* p_widget, long enable) {
+	// El offset +0x10 (16 bytes) contiene un puntero a la propiedad flotante (ej. Opacidad/Alpha o Escala)
+	f32** p_target_property = (f32**)((u8*)p_widget + 0x10);
+
+	if (enable != 0) {
+		// En la PS2 escribe 0x3f800000, lo que equivale a 1.0f (Visibilidad/Escala Máxima)
+		**p_target_property = 1.0f;
+		return;
+	}
+
+	// Si es falso, escribe 0.0f (Completamente oculto/Desactivado)
+	**p_target_property = 0.0f;
+	return;
+}
+
+/**
+ * @brief Función stub de paso directo de puntero (Identity Function).
+ * Utilizada originalmente en el motor para macros de validación o abstracción de nodos.
+ * Dirección original en Ghidra: 0x00338B00 (PAL)
+ *
+ * @param param_1 Primer parámetro (omitido en el retorno)
+ * @param p_node Puntero de nodo secundario que es devuelto de forma directa (param_2)
+ * @return void* El mismo puntero recibido en param_2.
+ */
+void* core_identity_stub(long param_1, void* p_node) {
+	// El descompilador de Ghidra demuestra que la PS2 simplemente mueve el registro de entrada
+	// al registro de salida de inmediato (move $v0, $a1).
+	return p_node;
 }
