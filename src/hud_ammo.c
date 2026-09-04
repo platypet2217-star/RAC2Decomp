@@ -106,3 +106,25 @@ void hud_set_state_from_lookup(u8* p_hudState, u8* table_ptr, s32 target_id) {
 	// Almacena el resultado en el offset de configuración +0x40 del componente del HUD
 	*(s32*)(p_hudState + 0x40) = result_value;
 }
+
+/**
+ * @brief Asigna cuatro valores de 32 bits de forma consecutiva en una estructura de datos.
+ * Comportamiento estándar para configurar vectores espaciales (X, Y, Z, W) o colores (R, G, B, A).
+ * Dirección original en Ghidra: 0x00337B18 (PAL)
+ *
+ * @param val1 Primer componente (ej. coordenada X o canal Rojo)
+ * @param val2 Segundo componente (ej. coordenada Y o canal Verde)
+ * @param val3 Tercer componente (ej. coordenada Z o canal Azul)
+ * @param val4 Cuarto componente (ej. coordenada W o canal Alfa/Transparencia)
+ * @param p_targetDestination Puntero que contiene la dirección de la estructura destino.
+ */
+void math_set_vector4(u32 val1, u32 val2, u32 val3, u32 val4, u32* p_targetDestination) {
+	// Obtiene la dirección base real del objeto destino
+	u32 base_address = *p_targetDestination;
+
+	// Almacena los 4 componentes de manera contigua en la memoria de la PS2 (saltos de 4 bytes)
+	*(u32*)(base_address + 0x0) = val1;
+	*(u32*)(base_address + 0x4) = val2;
+	*(u32*)(base_address + 0x8) = val3;
+	*(u32*)(base_address + 0xC) = val4;
+}
