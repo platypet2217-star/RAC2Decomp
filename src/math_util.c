@@ -1,6 +1,336 @@
 // src/math_util.c
 #include "types.h"
 
+// Prototipo requerido de la función interna que mapeamos previamente
+u64 math_pack_double64(u32* p_input_struct);
+
+
+// Prototipos requeridos de las funciones internas que completamos previamente
+void math_unpack_double64(u64* p_double_bits, u32* p_output_struct);
+s32  math_compare_double64(u32* p_unpack1, u32* p_unpack2);
+
+/**
+ * @brief Función de interfaz para comparar dos números flotantes de 64 bits (double).
+ * Desempaqueta de forma consecutiva ambos valores a través de buffers del stack y ejecuta la evaluación relacional.
+ * Dirección original en Ghidra: 0x00123028 (PAL)
+ *
+ * @param param_1 Primer valor double de 64-bits (a0 / a1)
+ * @param param_2 Segundo valor double de 64-bits (a2 / a3)
+ * @return s32 0 si son iguales, 1 si param_1 > param_2, o -1 si param_1 < param_2.
+ */
+s32 math_compare_double64_wrapper(u64 param_1, u64 param_2) {
+	u64 local_stack_val1 = param_1;
+	u64 local_stack_val2 = param_2;
+
+	// Arreglos de estructuras temporales que emulan los buffers auStack_70 y auStack_50 de la PS2
+	u32 unpack_struct1[8];
+	u32 unpack_struct2[8];
+
+	// 1. Desarmar bajo el estándar IEEE 754 ambos componentes de 64 bits
+	math_unpack_double64(&local_stack_val1, unpack_struct1);
+	math_unpack_double64(&local_stack_val2, unpack_struct2);
+
+	// 2. Ejecutar la comparación de jerarquía matemática
+	return math_compare_double64(unpack_struct1, unpack_struct2);
+}
+
+/**
+ * @brief Compara dos estructuras de números flotantes de doble precisión (64 bits).
+ * Evalúa signos, exponentes y mantisas de forma jerárquica para determinar igualdad o magnitud.
+ * Dirección original en Ghidra: 0x00122F10 (PAL)
+ *
+ * @param p_unpack1 Puntero a la estructura deconstruida del primer número double (param_1).
+ * @param p_unpack2 Puntero a la estructura deconstruida del segundo número double (param_2).
+ * @return int 0 si son idénticos, 1 si p_unpack1 > p_unpack2, o -1 si p_unpack1 < p_unpack2 (con fallbacks por signo).
+ */
+s32 math_compare_double64(u32* p_unpack1, u32* p_unpack2) {
+	u32 state1 = p_unpack1[0];
+	u32 state2 = p_unpack2[0];
+	u32 sign1 = p_unpack1[1];
+	u32 sign2 = p_unpack2[1];
+
+	// Caso A: Si alguno es NaN (estado 0 o 1), la comparación no es válida
+	if (state1 < 2 || state2 < 2) {
+		return 1;
+	}
+
+	// Caso B: El primer número es Infinito
+	if (state1 == 4) {
+		if (state2 == 4) {
+			return (s32)(sign2 - sign1);
+		}
+		return (sign1 == 0) ? 1 : -1;
+	}
+
+	// Caso C: El segundo número es Infinito
+	if (state2 == 4) {
+		return (sign2 == 0) ? -1 : 1;
+	}
+
+	// Caso D: El primer número es Cero
+	if (state1 == 2) {
+		if (state2 == 2) {
+			return 0;
+		}
+		return (sign2 == 0) ? -1 : 1;
+	}
+
+	// Caso E: El segundo número es Cero
+	if (state2 == 2) {
+		return (sign1 == 0) ? 1 : -1;
+	}
+
+	// Caso F: Ambos son números normales (Comparación jerárquica bajo IEEE 754)
+	if (sign1 == sign2) {
+		s32 exp1 = (s32)p_unpack1[2];
+		s32 exp2 = (s32)p_unpack2[2];
+
+		if (exp1 == exp2) {
+			u64 mant1 = *(u64*)(p_unpack1 + 4);
+			u64 mant2 = *(u64*)(p_unpack2 + 4);
+
+			if (mant1 == mant2) {
+				return 0;
+			}
+
+			s32 res = (mant1 > mant2) ? 1 : -1;
+			return (sign1 == 0) ? res : -res;
+		}
+
+		s32 res = (exp1 > exp2) ? 1 : -1;
+		return (sign1 == 0) ? res : -res;
+	}
+
+	return (sign1 == 0) ? 1 : -1;
+}
+
+
+/**
+ * @brief Descompone un número de punto flotante de doble precisión (64 bits) en sus componentes IEEE 754.
+ * Extrae el signo, el exponente sin sesgo, la mantisa extendida y clasifica el estado del número (NaN, Inf, Cero, Normal).
+ * Dirección original en Ghidra: 0x00122760 (PAL)
+ *
+ * @param p_double_bits Puntero a los 64 bits del valor double (param_1).
+ * @param p_output_struct Arreglo destino donde se guardarán los resultados del desempaquetado (param_2).
+ */
+void math_unpack_double64(u64* p_double_bits, u32* p_output_struct) {
+	u64 raw_bits = *p_double_bits;
+
+	// 1. Extrae los componentes binarios bajo el estándar IEEE 754 para variables de 64 bits
+	u64 mantissa = raw_bits & 0xFFFFFFFFFFFFFULL;
+	u32 exponent = (u32)((raw_bits >> 52) & 0x7FF);
+	u32 sign = (u32)(raw_bits >> 63);
+
+	p_output_struct[1] = sign; // Guarda el bit de signo
+
+	// Caso A: El exponente es cero (Número cero o subnormal)
+	if (exponent == 0) {
+		p_output_struct[0] = 2; // FLOAT_STATE_ZERO
+		return;
+	}
+
+	// Caso B: Número flotante normalizado válido
+	if (exponent != 0x7FF) {
+		// Añade el bit implícito de normalización y ajusta el desplazamiento
+		*(u64*)(p_output_struct + 4) = (mantissa << 8) | 0x1000000000000000ULL;
+		p_output_struct[2] = (s32)exponent - 0x3FF; // Remueve el sesgo (Bias) de 1023
+		p_output_struct[0] = 3;                      // FLOAT_STATE_NORMAL
+		return;
+	}
+
+	// Caso C: El exponente está al máximo (NaN o Infinito)
+	if (mantissa == 0) {
+		p_output_struct[0] = 4; // FLOAT_STATE_INFINITY
+		return;
+	}
+
+	// Clasificación de subtipos de NaN (Not a Number) de 64 bits
+	if ((raw_bits & 0x8000000000000ULL) == 0) {
+		p_output_struct[0] = 0; // FLOAT_STATE_NAN_QUIET
+	}
+	else {
+		p_output_struct[0] = 1; // FLOAT_STATE_NAN_SIGNALING
+	}
+
+	*(u64*)(p_output_struct + 4) = mantissa;
+	return;
+}
+
+
+/**
+ * @brief Convierte un número de punto flotante de precisión simple (32 bits) a doble precisión (64 bits).
+ * Equivalente de software portátil a la rutina __extendsfdf2 de la biblioteca runtime de la PS2.
+ * Dirección original en Ghidra: 0x001234F0 (PAL)
+ *
+ * @param param_1 Los 32 bits del número float original.
+ * @return double El resultado convertido al tipo de dato de 64-bits de doble precisión.
+ */
+double math_float_to_double(f32 param_1) {
+	// En la PS2 real, este proceso requiere desarmar bit a bit el formato IEEE 754 de 32 bits,
+	// reajustar los sesgos (bias) del exponente e invocar al empaquetador de 64 bits.
+	// Para efectos funcionales y portabilidad en sistemas modernos, el compilador lo resuelve de forma nativa:
+	return (double)param_1;
+}
+
+/**
+ * @brief Envoltorio de interfaz para empaquetar un flotante de 64-bits (double) desde variables del stack.
+ * Dirección original en Ghidra: 0x00123268 (PAL)
+ *
+ * @param param_1 Estado o componente inicial (a0)
+ * @param param_2 Componente secundario de signo (a1)
+ * @param param_3 Componente de exponente (a2)
+ * @param param_4 Puntero o valor de la mantisa de 64-bits (a3)
+ */
+void math_pack_double64_wrapper(u32 param_1, u32 param_2, u32 param_3, u64 param_4) {
+	// Estructura local que emula el volcado consecutivo en la pila (Stack) de la PS2
+	u32 local_stack_struct[4];
+
+	local_stack_struct[0] = param_1;
+	local_stack_struct[1] = param_2;
+	local_stack_struct[2] = param_3;
+	*(u64*)(&local_stack_struct[3]) = param_4; // Mapea la mantisa de 64 bits de forma contigua
+
+	// Invoca de inmediato a la subrutina empaquetadora maestra que reconstruimos antes
+	math_pack_double64(local_stack_struct);
+}
+
+/**
+ * @brief Reconstruye un número de punto flotante de doble precisión (64 bits - double) a partir de sus componentes.
+ * Sostiene de forma portátil la lógica de empaquetado binario bajo el estándar IEEE 754 del compilador de la PS2.
+ * Dirección original en Ghidra: 0x00122630 (PAL)
+ *
+ * @param p_input_struct Estructura interna que almacena el estado, signo, exponente y mantisa de la operación.
+ * @return u64 Los 64 bits combinados que forman el número decimal double real.
+ */
+u64 math_pack_double64(u32* p_input_struct) {
+	u32 state = p_input_struct[0];
+	u32 sign = p_input_struct[1];
+	s32 exponent = (s32)p_input_struct[2];
+	u64 mantissa = *(u64*)(p_input_struct + 4);
+
+	u64 out_exponent = 0;
+	u64 out_mantissa = 0;
+
+	if (state < 2) {
+		out_exponent = 0x7FF;
+		out_mantissa = mantissa | 0x8000000000000ULL;
+	}
+	else if (state == 4) {
+		out_exponent = 0x7FF;
+		out_mantissa = 0;
+	}
+	else {
+		if (state == 2 || mantissa == 0) {
+			out_mantissa = 0;
+			out_exponent = 0;
+		}
+		else {
+			// Manejo y ajuste de sesgo (bias) para exponentes subnormales o normales
+			if (exponent < -0x3FE) {
+				s32 shift = -0x3FE - exponent;
+				mantissa = (shift > 0x38) ? 0 : (mantissa >> shift);
+			}
+			else {
+				out_exponent = (u64)(exponent + 0x3FF);
+				if (exponent > 0x3FF) {
+					out_exponent = 0x7FF;
+					out_mantissa = 0;
+					return (out_mantissa & 0xFFFFFFFFFFFFFULL) | (out_exponent & 0x7FF) << 52 | (u64)sign << 63;
+				}
+
+				// Lógica interna de redondeo del compilador GCC de la PS2
+				if ((mantissa & 0xFF) == 0x80) {
+					if ((mantissa & 0x100) != 0) mantissa += 0x80;
+				}
+				else {
+					mantissa += 0x7F;
+				}
+
+				if (mantissa < 0x2000000000000000ULL) {
+					out_mantissa = mantissa >> 8;
+					return (out_mantissa & 0xFFFFFFFFFFFFFULL) | (out_exponent & 0x7FF) << 52 | (u64)sign << 63;
+				}
+				mantissa >>= 1;
+				out_exponent = (u64)(exponent + 0x400);
+			}
+			out_mantissa = mantissa >> 8;
+		}
+	}
+
+	// Combina los componentes en un mapa unificado de 64 bits
+	return (out_mantissa & 0xFFFFFFFFFFFFFULL) | (out_exponent & 0x7FF) << 52 | (u64)(int)sign << 63;
+}
+
+
+/**
+ * @brief Calcula el residuo o módulo de una división de 64 bits con signo (Equivalente portable a __moddi3).
+ * Sostiene las operaciones lógicas del operador '%' con números de 64-bits en el Emotion Engine.
+ * Dirección original en Ghidra: 0x00121450 (PAL)
+ *
+ * @param dividend Número de 64-bits con signo (param_1)
+ * @param divisor Número de 64-bits con signo (param_2)
+ * @return long El residuo con signo resultante de la operación.
+ */
+s64 math_mod64(s64 dividend, s64 divisor) {
+	if (divisor == 0) {
+		return 0; // Salvaguarda nativa contra excepciones de división por cero
+	}
+
+	// En sistemas modernos, esta línea de C reemplaza de forma portable y automática
+	// las cientos de líneas de lógica bitwise y manipulación de registros de la PS2.
+	return dividend % divisor;
+}
+
+/**
+ * @brief Descompone un número de punto flotante de 32 bits en sus componentes IEEE 754.
+ * Clasifica el número en categorías: NaN, Infinito, Cero, o Número Normal y extrae su exponente y mantisa.
+ * Dirección original en Ghidra: 0x00123400 (PAL)
+ *
+ * @param p_float_bits Puntero al valor flotante tratado como entero sin signo para manipulación de bits (param_1).
+ * @param p_output_struct Arreglo destino donde se guardará el estado, signo, exponente y mantisa (param_2).
+ */
+void math_unpack_float32(u32* p_float_bits, u32* p_output_struct) {
+	u32 raw_bits = *p_float_bits;
+
+	// 1. Extrae los tres componentes binarios estándar del formato flotante
+	u32 mantissa = raw_bits & 0x7FFFFF;
+	u32 exponent = (raw_bits >> 23) & 0xFF;
+	u32 sign = raw_bits >> 31;
+
+	p_output_struct[1] = sign; // Guarda el bit de signo (0 = positivo, 1 = negativo)
+
+	// Caso A: El exponente es cero (Número cero o subnormal)
+	if (exponent == 0) {
+		p_output_struct[0] = 2; // Token de estado: FLOAT_STATE_ZERO
+		return;
+	}
+
+	// Caso B: El exponente está al máximo (NaN o Infinito)
+	if (exponent == 0xFF) {
+		if (mantissa == 0) {
+			p_output_struct[0] = 4; // Token de estado: FLOAT_STATE_INFINITY
+			return;
+		}
+
+		// Clasificación interna de subtipos de NaN (Not a Number)
+		if ((raw_bits & 0x100000) == 0) {
+			p_output_struct[0] = 0; // FLOAT_STATE_NAN_QUIET
+		}
+		else {
+			p_output_struct[0] = 1; // FLOAT_STATE_NAN_SIGNALING
+		}
+		p_output_struct[3] = mantissa;
+		return;
+	}
+
+	// Caso C: Número flotante normalizado válido
+	p_output_struct[3] = (mantissa << 7) | 0x40000000; // Ajusta y reconstruye la mantisa con el bit implícito
+	p_output_struct[2] = exponent - 0x7F;              // Remueve el sesgo (Bias) de 127 del exponente MIPS
+	p_output_struct[0] = 3;                            // Token de estado: FLOAT_STATE_NORMAL
+	return;
+}
+
+
 /**
  * @brief División de 64 bits con signo (Equivalente portátil a __divdi3).
  * Sostiene las operaciones lógicas de división con números negativos en el hardware de la PS2.

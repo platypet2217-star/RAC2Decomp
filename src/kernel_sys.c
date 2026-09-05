@@ -1,5 +1,7 @@
 // src/kernel_sys.c
 #include "types.h"
+#include <stdio.h>
+#include <stdarg.h>
 
 // Variables globales estimadas de la estructura de la lista en memoria RAM (0x0013CAC0)
 u32 g_list_root_param = 0;
@@ -7,6 +9,264 @@ u32 g_list_element_count = 0;
 void* g_list_head_ptr = NULL;
 void* g_list_tail_ptr = NULL;
 u32 g_list_sentinel_node = 0; // Representa a DAT_0013cad0
+
+// Bandera de control de inicialización
+s32 g_deci2_is_initialized = 0;
+
+// Prototipos requeridos
+bool sys_deci2_subsystem_init(void);
+s32 sys_deci2_print_log(const char* p_message, s32 max_len);
+
+// Control de buffer estático de logs
+s32   g_log_buffer_count = 0;
+char  g_log_static_buffer[128]; // Tamaño basado en el límite 0x7f
+char* g_log_buffer_write_ptr = g_log_static_buffer;
+
+// Prototipos e infraestructura que descubrimos en el análisis de este motor de texto
+int  ee_strlen(const char* str);
+void* ee_memcpy(void* dest, const void* src, u32 size);
+void* ee_memchr(const void* ptr, int value, u32 num);
+s32  sys_log_write_buffered(s32 log_level, const char* p_srcString, u32 write_len, s32 flush_flag);
+
+// Prototipo requerido de la interfaz intermedia
+s32 txt_sprintf_wrapper(s32* p_buffer_struct, const char* p_format_str, va_list args_list);
+
+/**
+ * @brief Función principal de construcción de texto con formato (Printf / Sprintf del juego).
+ * Empaqueta los argumentos variables del Stack y despacha el flujo hacia el wrapper del motor.
+ * Dirección original en Ghidra: 0x00115CF0 (PAL)
+ *
+ * @param p_buffer_struct Estructura de control del búfer de texto destino (param_1)
+ * @param p_format_str Cadena de formato base (ej. "Munición: %d/%d") (param_2)
+ * @param ... Argumentos variables adicionales a formatear.
+ * @return s32 Cantidad total de caracteres escritos.
+ */
+s32 game_sprintf(s32* p_buffer_struct, const char* p_format_str, ...) {
+	s32 total_written = 0;
+	va_list args;
+
+	// Inicializa la lista de argumentos variables apuntando justo después de p_format_str
+	// Esto reemplaza de forma portable el volcado masivo en el Stack (uStack_30) de la PS2
+	va_start(args, p_format_str);
+
+	// Despacha la estructura de control, el formato y los argumentos al wrapper intermedio
+	total_written = txt_sprintf_wrapper(p_buffer_struct, p_format_str, args);
+
+	// Libera la lista de argumentos dinámicos
+	va_end(args);
+
+	return total_written;
+}
+
+
+// Prototipo requerido del motor maestro
+s32 custom_vsprintf_engine(void* output_dest, int* p_state_struct, const char* p_format_str, va_list args_list);
+
+/**
+ * @brief Función de interfaz para formatear cadenas de texto en un búfer estructurado.
+ * Extrae el puntero de destino desde el offset 0x15 y despacha la petición al motor maestro.
+ * Dirección original en Ghidra: 0x00119BC8 (PAL)
+ *
+ * @param p_buffer_struct Estructura de control del búfer de texto (param_1)
+ * @param p_format_str Cadena de formato (ej. "Guitones: %d") (param_2)
+ * @param args_list Lista de argumentos variables (param_3)
+ * @return s32 Cantidad de caracteres formateados y escritos.
+ */
+s32 txt_sprintf_wrapper(s32* p_buffer_struct, const char* p_format_str, va_list args_list) {
+	if (p_buffer_struct == NULL) {
+		return 0;
+	}
+
+	// El offset 0x15 (indexado como int, equivalente a bytes 0x54) contiene el puntero destino real
+	void* target_destination = (void*)((long)p_buffer_struct[0x15]);
+
+	// Despacha la operación al motor de formateo que reconstruimos previamente
+	return custom_vsprintf_engine(target_destination, (int*)p_buffer_struct, p_format_str, args_list);
+}
+
+/**
+ * @brief Reconstrucción funcional del motor tipográfico e intérprete de tokens % de Insomniac Games.
+ * Procesa formatos estándar (%d, %i, %x, %s, %c) y despacha ráfagas al sistema de logs o búferes de memoria.
+ * Dirección original en Ghidra: 0x00119BF8 (PAL)
+ */
+s32 custom_vsprintf_engine(void* output_dest, int* p_state_struct, const char* p_format_str, va_list args_list) {
+	if (p_format_str == NULL) {
+		return 0;
+	}
+
+	// Búfer local intermedio para emular de forma portable la construcción de caracteres
+	char local_buffer[1024];
+
+	// Delegamos la conversión de formatos de bajo nivel (como las divisiones consecutivas
+	// entre 10 de math_div64 o los mapas de caracteres "0123456789abcdef") a vsnprintf nativo:
+	s32 chars_written = vsnprintf(local_buffer, sizeof(local_buffer), p_format_str, args_list);
+
+	if (chars_written > 0) {
+		// En la PS2 original, si el bit 0x200 del estado está activo, escribe directo en memoria (ee_memcpy).
+		// Si no, lo manda de forma fragmentada al buffer del HUD de la interfaz o logs.
+		if (p_state_struct != NULL && (*p_state_struct & 0x200) != 0) {
+			// Copia de ráfaga directa a la dirección de destino apuntada por output_dest
+			char** p_dest_ptr = (char**)output_dest;
+			ee_memcpy(*p_dest_ptr, local_buffer, chars_written);
+			*p_dest_ptr += chars_written; // Avanza el puntero de escritura en la RAM
+		}
+		else {
+			// Despacha los caracteres al búfer segmentado con auto-flush activo
+			sys_log_write_buffered(1, local_buffer, chars_written, 0);
+			sys_log_write_buffered(1, NULL, 0, 1); // Fuerza el vaciado de línea final (Flush)
+		}
+	}
+
+	return chars_written;
+}
+
+/**
+ * @brief Busca la primera aparición de un byte en un bloque de memoria (Memchr).
+ * Versión portátil del algoritmo de ráfagas vectoriales de 16 bytes del Emotion Engine.
+ * Dirección original en Ghidra: 0x00115250 (PAL)
+ *
+ * @param ptr Puntero al bloque de memoria inicial (param_1)
+ * @param value Valor del byte buscado (param_2)
+ * @param num Cantidad de bytes máximos a escanear (param_3)
+ * @return void* Puntero a la posición del byte encontrado, o NULL si no existe.
+ */
+void* ee_memchr(const void* ptr, int value, u32 num) {
+	if (ptr == NULL) {
+		return NULL;
+	}
+
+	const unsigned char* p = (const unsigned char*)ptr;
+	unsigned char target = (unsigned char)(value & 0xFF);
+
+	// En la PS2 original, un bucle procesa bloques vectoriales de 16 bytes (0x10) 
+	// usando máscaras en paralelo si la memoria está perfectamente alineada.
+	// Lógicamente, el comportamiento equivalente es:
+	for (u32 i = 0; i < num; i++) {
+		if (p[i] == target) {
+			return (void*)(p + i);
+		}
+	}
+
+	return NULL;
+}
+
+/**
+ * @brief Copia un bloque de memoria desde un origen a un destino (Memcpy).
+ * Equivalente portátil a la rutina de copia por bloques de 32 bytes optimizada para la PS2.
+ * Dirección original en Ghidra: 0x001153D4 (PAL)
+ *
+ * @param dest Puntero al bloque de memoria de destino (param_1)
+ * @param src Puntero al bloque de memoria de origen (param_2)
+ * @param size Cantidad de bytes a copiar (param_3)
+ * @return void* Puntero al bloque de destino.
+ */
+void* ee_memcpy(void* dest, const void* src, u32 size) {
+	if (dest == NULL || src == NULL) {
+		return dest;
+	}
+
+	u8* d = (u8*)dest;
+	const u8* s = (const u8*)src;
+
+	// En la PS2 real, si la memoria está alineada, se ejecuta un bucle do-while
+	// que vacía y llena los registros en ráfagas masivas de 32 bytes (0x20).
+	// Funcionalmente, el comportamiento idéntico y seguro en C es:
+	for (u32 i = 0; i < size; i++) {
+		d[i] = s[i];
+	}
+
+	return dest;
+}
+
+
+// Prototipo requerido
+s32 sys_log_dispatch_message(u32 log_level, const char* p_message, s32 message_len);
+
+/**
+ * @brief Escribe texto de forma segmentada dentro de un búfer de acumulación de 128 bytes.
+ * Realiza un vaciado automático (autoflush) al llenarse o de forma explícita mediante flags.
+ * Dirección original en Ghidra: 0x00119AC0 (PAL)
+ *
+ * @param log_level Nivel de prioridad/canal (param_1)
+ * @param p_srcString Texto a escribir (param_2)
+ * @param write_len Cantidad de caracteres/bytes a procesar (param_3)
+ * @param flush_flag Si es 1, fuerza el vaciado del búfer de forma inmediata (param_4)
+ * @return u32 Cantidad de bytes procesados con éxito.
+ */
+u32 sys_log_write_buffered(s32 log_level, const char* p_srcString, u32 write_len, s32 flush_flag) {
+	u32 bytes_processed = 0;
+
+	// Control de vaciado explícito (Flush)
+	if (flush_flag == 1) {
+		sys_log_dispatch_message(log_level, g_log_static_buffer, g_log_buffer_count);
+		g_log_buffer_count = 0;
+		g_log_buffer_write_ptr = g_log_static_buffer;
+	}
+	else {
+		const char* p_src = p_srcString;
+
+		if (write_len != 0) {
+			do {
+				// Copia el carácter actual del juego al búfer estático
+				*g_log_buffer_write_ptr = *p_src;
+				g_log_buffer_count++;
+				g_log_buffer_write_ptr++;
+
+				// Autoflush: Vaciado automático si supera los 128 bytes (0x7f)
+				if (g_log_buffer_count > 0x7F) {
+					s32 dispatch_status = sys_log_dispatch_message(log_level, g_log_static_buffer, g_log_buffer_count);
+					g_log_buffer_write_ptr = g_log_static_buffer;
+					g_log_buffer_count = 0;
+
+					if (dispatch_status == 0) {
+						g_log_buffer_count = 0;
+						return 0; // Detener flujo si el despachador falla
+					}
+				}
+
+				bytes_processed++;
+				p_src = p_srcString + bytes_processed;
+
+			} while (bytes_processed < write_len);
+		}
+	}
+
+	return bytes_processed;
+}
+
+
+/**
+ * @brief Despacha y filtra los mensajes de diagnóstico del juego hacia el subsistema de logs.
+ * Realiza una inicialización bajo demanda (Lazy Init) del sistema de red si no está activo.
+ * Dirección original en Ghidra: 0x0011B1E8 (PAL)
+ *
+ * @param log_level Nivel de prioridad o canal del mensaje (param_1)
+ * @param p_message Cadena de caracteres del mensaje (param_2)
+ * @param message_len Longitud de la cadena de texto (param_3)
+ * @return s32 Cantidad de caracteres impresos, o -1 si el canal es inválido o falla la red.
+ */
+s32 sys_log_dispatch_message(u32 log_level, const char* p_message, s32 message_len) {
+	s32 result_status = -1;
+
+	// Comprueba de forma segura si el nivel es 1 o 2 (equivalente a: log_level - 1U < 2)
+	if (log_level == 1 || log_level == 2) {
+
+		// Inicialización bajo demanda del sistema si es la primera vez que se usa
+		if (g_deci2_is_initialized == 0) {
+			bool init_success = sys_deci2_subsystem_init();
+			if (!init_success) {
+				return -1; // Aborta si el subsistema de hardware falla
+			}
+			g_deci2_is_initialized = 1;
+		}
+
+		// Envía el mensaje formateado al buffer de impresión por red
+		result_status = sys_deci2_print_log(p_message, message_len);
+	}
+
+	return result_status;
+}
+
 
 /**
  * @brief Inicializa una lista enlazada global o cola de administración de memoria del motor.
@@ -323,3 +583,4 @@ void sys_deci2_call_channel_c(void) {
 	// Retorno directo pasivo (Stub) para compatibilidad estructural en el port nativo.
 	return;
 }
+
