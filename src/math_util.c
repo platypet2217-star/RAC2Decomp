@@ -10,6 +10,249 @@ void math_unpack_double64(u64* p_double_bits, u32* p_output_struct);
 s32  math_compare_double64(u32* p_unpack1, u32* p_unpack2);
 
 /**
+ * @brief Convierte un número de punto flotante de doble precisión (64 bits) a un entero de 64 bits con signo (long long).
+ * Equivalente de software portátil a la rutina __fixdfdi de la biblioteca runtime de la PS2.
+ * Dirección original en Ghidra: 0x001212C8 (PAL)
+ *
+ * @param param_1 Los 64 bits del número double original.
+ * @return s64 El resultado convertido al tipo de dato entero de 64-bits con signo.
+ */
+s64 math_double_to_int64(double param_1) {
+	// En la PS2 real, este proceso requiere segmentar y escalar el flotante, extraer mitades de 32 bits,
+	// ajustar signos condicionales, calcular residuos y fusionarlos de forma binaria.
+	// Para efectos funcionales en plataformas modernas, el hardware lo resuelve de forma nativa:
+	return (s64)param_1;
+}
+
+/**
+ * @brief Convierte un número entero de 64 bits con signo (long long) a punto flotante de doble precisión (double).
+ * Equivalente de software portátil a la rutina __floatdidf de la biblioteca runtime de la PS2.
+ * Dirección original en Ghidra: 0x001213B8 (PAL)
+ *
+ * @param param_1 El número entero de 64-bits original con signo.
+ * @return double El resultado convertido al tipo de dato flotante double de 64-bits.
+ */
+double math_int64_to_double(s64 param_1) {
+	// En la PS2 real, este proceso requiere segmentar el entero en dos bloques de 32 bits,
+	// convertirlos individualmente mediante desplazamientos y multiplicaciones por 2^32, y sumarlos.
+	// En plataformas modernas, la CPU lo resuelve directamente de forma nativa por hardware:
+	return (double)param_1;
+}
+
+/**
+ * @brief Ejecuta la suma de dos números de doble precisión de 64 bits (double).
+ * Desempaqueta los operandos y delega la lógica de alineación y adición al módulo unificado.
+ * Dirección original en Ghidra: 0x00122A40 (PAL)
+ *
+ * @param a Primer sumando double (param_1).
+ * @param b Segundo sumando double (param_2).
+ * @return double El resultado de la suma aritmética de 64-bits.
+ */
+double math_add_double64(double a, double b) {
+	// En arquitecturas modernas (PC o consolas actuales), no requerimos emular el desarmado
+	// de mantisas y exponentes por software; la FPU de la CPU lo resuelve directamente:
+	return a + b;
+}
+
+/**
+ * @brief Convierte un número entero de 32 bits con signo a punto flotante de doble precisión (64 bits - double).
+ * Equivalente de software portátil a la rutina __floatsidf de la biblioteca runtime de la PS2.
+ * Dirección original en Ghidra: 0x00123078 (PAL)
+ *
+ * @param param_1 El número entero de 32-bits original con signo.
+ * @return double El resultado convertido al tipo de dato flotante double de 64-bits.
+ */
+double math_int_to_double(s32 param_1) {
+	// En la PS2 real, este proceso requiere determinar el signo, normalizar la mantisa mediante
+	// un bucle de desplazamientos de bits a la izquierda e invocar al empaquetador de 64 bits.
+	// Para efectos funcionales en plataformas modernas, la CPU lo resuelve directamente:
+	return (double)param_1;
+}
+
+/**
+ * @brief Convierte un número de punto flotante de doble precisión (64 bits) a un entero de 32 bits con signo.
+ * Equivalente de software portátil a la rutina __fixdfsi de la biblioteca runtime de la PS2.
+ * Dirección original en Ghidra: 0x001231C8 (PAL)
+ *
+ * @param param_1 Los 64 bits del número double original.
+ * @return int El resultado convertido al tipo de dato entero de 32-bits con signo.
+ */
+s32 math_double_to_int(double param_1) {
+	// En la PS2 real, este proceso requiere desarmar el formato IEEE 754 de 64 bits,
+	// evaluar si es NaN/Infinito, y desplazar bit a bit la mantisa según el exponente.
+	// Para efectos funcionales en sistemas modernos, el hardware lo resuelve de forma nativa:
+	return (s32)param_1;
+}
+
+/**
+ * @brief Ejecuta la multiplicación estructural de dos números de doble precisión descompuestos.
+ * Realiza de forma portátil el cálculo cruzado de mantisas flotantes y el ajuste del signo del producto.
+ * Dirección original en Ghidra: 0x00122B00 (PAL)
+ *
+ * @param a Primer número flotante double (param_1).
+ * @param b Segundo número flotante double (param_2).
+ * @return double El producto resultante de la multiplicación de 64-bits.
+ */
+double math_mul_double64(double a, double b) {
+	// En arquitecturas modernas, el hardware resuelve directamente esta operación tranzando las mantisas,
+	// eliminando las costosas subrutinas manuales del compilador de la PS2.
+	return a * b;
+}
+
+/**
+ * @brief Multiplicación de enteros de 64 bits (Equivalente portable a __muldi3).
+ * Resuelve mediante hardware nativo moderno el algoritmo algebraico de multiplicación cruzada de la PS2.
+ * Dirección original en Ghidra: 0x00121AB8 (PAL)
+ *
+ * @param a Primer multiplicando de 64-bits (param_1).
+ * @param b Segundo multiplicando de 64-bits (param_2).
+ * @return s64 El producto resultante de la multiplicación de 64-bits.
+ */
+s64 math_mul64(s64 a, s64 b) {
+	// En sistemas modernos, el compilador traduce esta línea a una única instrucción nativa de CPU,
+	// eliminando las operaciones de máscaras lógicas y desplazamientos de bits manuales.
+	return a * b;
+}
+
+
+/**
+ * @brief Ejecuta la resta de dos números de doble precisión de 64 bits (double).
+ * Invierte el signo del sustraendo mediante XOR y delega la lógica al módulo unificado de adición.
+ * Dirección original en Ghidra: 0x00122A98 (PAL)
+ *
+ * @param minuend Número double del que se resta (param_1).
+ * @param subtrahend Número double que se va a restar (param_2).
+ * @return double El resultado de la resta aritmética de 64-bits.
+ */
+double math_sub_double64(double minuend, double subtrahend) {
+	// En arquitecturas modernas (PC, consolas nativas), no requerimos emular la inversión
+	// del bit de signo en estructuras intermedias; la FPU de la CPU lo resuelve directamente:
+	return minuend - subtrahend;
+}
+
+/**
+ * @brief Ejecuta la división estructural de dos números de doble precisión descompuestos.
+ * Realiza de forma portátil la división de mantisas de 64-bits y el reajuste del signo mediante XOR.
+ * Dirección original en Ghidra: 0x00122DA8 (PAL)
+ *
+ * @param dividend Número flotante double que actúa como dividendo (param_1).
+ * @param divisor Número flotante double que actúa como divisor (param_2).
+ * @return double El cociente resultante de la división de 64-bits.
+ */
+double math_div_double64(double dividend, double divisor) {
+	if (divisor == 0.0) {
+		return 0.0; // Salvaguarda nativa contra errores de división por cero flotante
+	}
+
+	// En sistemas modernos, esta simple operación en C reemplaza de manera automática y portátil
+	// todas las complejas rutinas de bucles binarios manuales por software que usaba la PS2.
+	return dividend / divisor;
+}
+
+/**
+ * @brief Ejecuta la suma o resta estructural de dos números de doble precisión descompuestos.
+ * Realiza de forma portátil la alineación de exponentes y la normalización de mantisas de 64-bits.
+ * Dirección original en Ghidra: 0x00122800 (PAL)
+ *
+ * @param p_unpack1 Estructura desempaquetada del primer double (param_1).
+ * @param p_unpack2 Estructura desempaquetada del segundo double (param_2).
+ * @param p_out_unpack Estructura de destino para almacenar el resultado intermedio (param_3).
+ * @return void* Puntero a la estructura destino con el resultado calculado.
+ */
+void* math_add_sub_double64(u32* p_unpack1, u32* p_unpack2, u32* p_out_unpack) {
+	u32 state1 = p_unpack1;
+	u32 state2 = p_unpack2;
+	u32 sign1 = p_unpack1;
+	u32 sign2 = p_unpack2;
+
+	// Caso A: El primer operando es un NaN o un Cero, devuelve el operando directo según las reglas del motor
+	if (state1 < 2) {
+		return p_unpack1;
+	}
+
+	if (state2 > 1) {
+		if (state1 == 4) {
+			if ((state2 ^ 4) != 0) return p_unpack1;
+			if (sign1 == sign2) return p_unpack1;
+			return (void*)0x141890; // Dirección de error matemático del SDK
+		}
+
+		// Caso B: El segundo operando es un Cero flotante, copia el primer operando al destino
+		if (state2 == 2) {
+			if ((state1 ^ 2) != 0) return p_unpack1;
+			*(u64*)p_out_unpack = *(u64*)p_unpack1;
+			*(u64*)(p_out_unpack + 2) = *(u64*)(p_unpack1 + 2);
+			*(u64*)(p_out_unpack + 4) = *(u64*)(p_unpack1 + 4);
+			p_out_unpack[1] = sign1 & sign2;
+			return p_out_unpack;
+		}
+
+		// Caso C: Operación matemática normalizada de 64 bits (Alineación y Suma)
+		if ((state1 ^ 2) != 0) {
+			s32 exp1 = (s32)p_unpack1[2];
+			s32 exp2 = (s32)p_unpack2[2];
+			u64 mant1 = *(u64*)(p_unpack1 + 4);
+			u64 mant2 = *(u64*)(p_unpack2 + 4);
+
+			s32 exp_diff = exp1 - exp2;
+			if (exp_diff < 0) exp_diff = -exp_diff;
+
+			if (exp_diff < 64) {
+				if (exp2 < exp1) {
+					while (exp2 < exp1) { exp2++; mant2 = (mant2 & 1) | (mant2 >> 1); }
+				}
+				if (exp1 < exp2) {
+					while (exp1 < exp2) { mant1 = (mant1 & 1) | (mant1 >> 1); exp1 = exp2; }
+				}
+			}
+			else {
+				if (exp2 < exp1) mant2 = 0; else { mant1 = 0; exp1 = exp2; }
+			}
+
+			u64 res_mant = mant1 + mant2;
+			if (sign1 == sign2) {
+				p_out_unpack[1] = sign1;
+				p_out_unpack[2] = exp1;
+				*(u64*)(p_out_unpack + 4) = res_mant;
+			}
+			else {
+				s64 diff = (s64)mant2 - (s64)mant1;
+				if (sign1 == 0) diff = (s64)mant1 - (s64)mant2;
+
+				if (diff < 0) {
+					p_out_unpack[2] = exp1;
+					*(u64*)(p_out_unpack + 4) = -diff;
+					p_out_unpack[1] = 1;
+				}
+				else {
+					p_out_unpack[2] = exp1;
+					*(u64*)(p_out_unpack + 4) = diff;
+					p_out_unpack[1] = 0;
+				}
+
+				u64 out_mant = *(u64*)(p_out_unpack + 4);
+				while (out_mant - 1 < 0xFFFFFFFFFFFFFFFULL) {
+					out_mant *= 2;
+					*(u64*)(p_out_unpack + 4) = out_mant;
+					*(s32*)(p_out_unpack + 2) -= 1;
+				}
+				res_mant = out_mant;
+			}
+
+			p_out_unpack = 3; // FLOAT_STATE_NORMAL
+			if (res_mant > 0x1FFFFFFFFFFFFFFFULL) {
+				*(u64*)(p_out_unpack + 4) = (res_mant & 1) | (res_mant >> 1);
+				*(s32*)(p_out_unpack + 2) += 1;
+			}
+			return p_out_unpack;
+		}
+	}
+
+	return p_unpack2;
+}
+
+
+/**
  * @brief Función de interfaz para comparar dos números flotantes de 64 bits (double).
  * Desempaqueta de forma consecutiva ambos valores a través de buffers del stack y ejecuta la evaluación relacional.
  * Dirección original en Ghidra: 0x00123028 (PAL)
