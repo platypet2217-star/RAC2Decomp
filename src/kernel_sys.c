@@ -2,6 +2,648 @@
 #include "types.h"
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
+#include <errno.h>
+
+// Referencias requeridas de tu ecosistema
+s32  game_sprintf(s32* p_buffer_struct, const char* p_format_str, ...);
+void sys_assert_fail(const char* p_assertion, const char* p_file, s32 line);
+
+// Prototipo de la función maestra que completamos previamente
+const void** ee_get_ctype_table_ptr(void);
+
+// Control de buffer estático secundario/alternativo de logs
+s32   g_log_buffer_count_alt = 0;
+char  g_log_static_buffer_alt[128]; // Tamaño basado en el límite 0x7f
+char* g_log_buffer_write_ptr_alt = g_log_static_buffer_alt;
+
+// Prototipo del despachador maestro requerido
+s32 sys_log_dispatch_message(u32 log_level, const char* p_message, s32 message_len);
+
+// Variables de buffer globales estáticas remanentes de la PS2
+char g_dtoa_output_buffer[256] = { 0 }; // DAT_0013c100
+
+// Referencias a tus helpers del Canal B e interfaz de localización
+const void** ee_ctype_interface_wrapper(void);
+u32 sys_log_write_buffered_alt(s32 log_level, const char* p_srcString, u32 write_len, s32 flush_flag);
+void* ee_memcpy(void* dest, const void* src, u32 size);
+
+// Referencias a tus dos motores ya mapeados en tu ecosistema
+s32 custom_vsprintf_engine(void* output_dest, int* p_state_struct, const char* p_format_str, va_list args_list);
+s32 custom_vsprintf_engine_alt(void* output_dest, int* p_state_struct, const char* p_format_str, va_list args_list);
+
+// Prototipo de tu despachador inteligente ya mapeado
+s32 txt_sprintf_channel_dispatcher(s32* p_buffer_struct, const char* p_format_str, va_list args_list);
+
+/**
+ * @brief Función interna vsnprintf del motor. Da formato a un string con límite de tamaño.
+ * Inicializa la estructura de control local y delega el flujo al despachador de canales condicional.
+ * Dirección original en Ghidra: 0x00115DA8 (PAL)
+ *
+ * @param p_dest_buffer Búfer físico en la RAM donde se escribirá el texto resultante (param_8).
+ * @param p_format_str Cadena de formato base con tokens (param_9).
+ * @param args_list Lista de argumentos variables empaquetados (param_10 / ...).
+ * @return s32 Cantidad total de caracteres escritos con éxito.
+ */
+s32 txt_vsnprintf_internal(char* p_dest_buffer, const char* p_format_str, va_list args_list) {
+	if (p_dest_buffer == NULL || p_format_str == NULL) {
+		return 0;
+	}
+
+	// Estructura de control local que emula el volcado contiguo apuStack_e0 de la PS2
+	// Indexada como enteros de 32 bits para interactuar con el despachador
+	s32 local_buffer_struct[8];
+
+	local_buffer_struct[0] = (s32)((long)p_dest_buffer);
+	local_buffer_struct[1] = 0x7FFFFFFF; // Banderas de control de estado del búfer (uStack_cc)
+	local_buffer_struct[2] = 0x7FFFFFFF; // Límites físicos lógicos (uStack_d8)
+	local_buffer_struct[3] = 0x00000208; // Máscara de alineación y tipo de canal (uStack_d4)
+
+	// Invoca de golpe al despachador inteligente para procesar la cadena por el canal correcto
+	s32 total_written = txt_sprintf_channel_dispatcher(local_buffer_struct, p_format_str, args_list);
+
+	// Recupera la posición final del cursor de escritura avanzado por los motores de texto
+	char* p_final_cursor = (char*)((long)local_buffer_struct[0]);
+
+	// Inyecta el terminador nulo de seguridad para cerrar el string de forma limpia
+	*p_final_cursor = '\0';
+
+	return total_written;
+}
+
+/**
+ * @brief Intercepta y despacha cadenas de formato evaluando la presencia de tokens científicos/flotantes (%e, %g, %f).
+ * Distribuye de forma dinámica la carga de procesamiento entre el motor principal y el motor alterno de telemetría.
+ * Dirección original en Ghidra: 0x00118CC8 (PAL)
+ */
+s32 txt_sprintf_channel_dispatcher(s32* p_buffer_struct, const char* p_format_str, va_list args_list) {
+	if (p_format_str == NULL || *p_format_str == '\0') {
+		// Despacho directo al canal principal si el string está vacío
+		void* target_destination = (void*)((long)p_buffer_struct[0x15]);
+		return custom_vsprintf_engine(target_destination, (int*)p_buffer_struct, p_format_str, args_list);
+	}
+
+	const u8* p_scan = (const u8*)p_format_str;
+	u8 current_char = *p_scan;
+
+	// Peina el string buscando tokens de formato específicos del canal B
+	do {
+		if (current_char == 0x25) { // Carácter '%'
+			const u8* p_token = p_scan + 1;
+			p_scan = p_scan + 1;
+
+			if (*p_token != '\0') {
+				// Se salta los modificadores de precisión, ancho o flags numéricos
+				while ((char)*p_scan < 'A') {
+					if (p_scan[1] == '\0') {
+						current_char = *p_scan;
+						goto evaluate_token;
+					}
+					p_scan++;
+				}
+				current_char = *p_scan;
+
+			evaluate_token:
+				// Evalúa si el token final pertenece al set de formato flotante científico ('E', 'G', 'f', etc.)
+				switch ((s32)(current_char - 0x45)) {
+				case 0:  // 'E'
+				case 2:  // 'G'
+				case 7:  // 'f'
+				case 0x20: // 'e'
+				case 0x21: // 'f' alternativo / modificado
+				case 0x22: // 'g'
+					// Desvía de golpe el flujo de ejecución hacia el motor secundario de telemetría
+					void* target_dest_alt = (void*)((long)p_buffer_struct[0x15]);
+					return custom_vsprintf_engine_alt(target_dest_alt, (int*)p_buffer_struct, p_format_str, args_list);
+				default:
+					p_scan++;
+					break;
+				}
+			}
+		}
+		else {
+			p_scan++;
+		}
+
+		if (*p_scan == '\0') {
+			break;
+		}
+		current_char = *p_scan;
+	} while (1);
+
+	// Si el string no contenía tokens científicos, se procesa por el canal maestro estándar
+	void* target_destination = (void*)((long)p_buffer_struct[0x15]);
+	return custom_vsprintf_engine(target_destination, (int*)p_buffer_struct, p_format_str, args_list);
+}
+
+/**
+ * @brief Motor secundario de formateo y construcción de strings del canal alterno de telemetría.
+ * Analiza tokens lógicos e inyecta ráfagas de texto en el canal B de logs de Insomniac Games.
+ * Dirección original en Ghidra: 0x00118D98 (PAL)
+ */
+s32 custom_vsprintf_engine_alt(void* output_dest, int* p_state_struct, const char* p_format_str, va_list args_list) {
+	if (p_format_str == NULL) {
+		return 0;
+	}
+
+	// Inicializa el mapeo local de localización del compilador original
+	ee_ctype_interface_wrapper();
+
+	char local_buffer;
+
+	// Delegamos de forma portátil el parseo masivo de flags ('-', '+', '#', '.')
+	// y precisión de 64 bits al hardware nativo de la CPU moderna:
+	s32 chars_written = vsnprintf(local_buffer, sizeof(local_buffer), p_format_str, args_list);
+
+	if (chars_written > 0) {
+		// Si el estado activa el bit 0x200, escribe directo en la dirección de memoria destino
+		if (p_state_struct != NULL && (*p_state_struct & 0x200) != 0) {
+			char** p_dest_ptr = (char**)output_dest;
+			ee_memcpy(*p_dest_ptr, local_buffer, chars_written);
+			*p_dest_ptr += chars_written;
+		}
+		// Si no, despacha el flujo de telemetría a tu canal secundario de buffers
+		else {
+			sys_log_write_buffered_alt(1, local_buffer, chars_written, 0);
+			sys_log_write_buffered_alt(1, NULL, 0, 1); // Flush final de línea
+		}
+	}
+
+	return chars_written;
+}
+
+/**
+ * @brief Convierte un número flotante de doble precisión a su representación en texto ASCII (Dtoa Engine).
+ * Soporta representaciones decimales fijas (%f) y notaciones exponenciales científicas (%e / %g).
+ * Dirección original en Ghidra: 0x001185E8 (PAL)
+ *
+ * @param value El número double original de 64 bits que se va a formatear (param_1).
+ * @param precision Cantidad de dígitos decimales de precisión solicitados (param_2).
+ * @param format_char Carácter del tipo de token ('f', 'e', 'g') (param_3).
+ * @param flags Banderas de control de relleno o truncamiento de ceros (param_4).
+ * @return const char* Puntero al búfer estático global que almacena el texto formateado.
+ */
+const char* math_dtoa_format(double value, s32 precision, char format_char, s32 flags) {
+	// En la PS2 real, este proceso requiere extraer exponentes IEEE 754, ejecutar bucles manuales de
+	// fmod_double64 para los dígitos, aplicar el redondeador ascii y amarrar el exponente con ee_itoa.
+	// De forma portable y moderna, el compilador actual resuelve esta conversión matemática:
+
+	char format_specifier[16];
+
+	// Construye dinámicamente el especificador de formato nativo (ej. "%.6f" o "%.6e")
+	if (flags != 0 && format_char == 'g') {
+		snprintf(format_specifier, sizeof(format_specifier), "%%.%dg", precision);
+	}
+	else {
+		snprintf(format_specifier, sizeof(format_specifier), "%%.%d%c", precision, format_char);
+	}
+
+	// Ejecuta el formateo directo por hardware sobre nuestro buffer estático global
+	snprintf(g_dtoa_output_buffer, sizeof(g_dtoa_output_buffer), format_specifier, value);
+
+	return g_dtoa_output_buffer;
+}
+
+// Prototipo de tu inversor de cadenas ya mapeado
+char* ee_strrev(char* p_str);
+
+/**
+ * @brief Convierte un número entero a una cadena de caracteres ASCII en cualquier base numérica (Itoa / Ltoa).
+ * Invoca de forma directa a ee_strrev para rectificar la orientación final de los caracteres en la memoria.
+ * Dirección original en Ghidra: 0x00118548 (PAL)
+ *
+ * @param value Número entero a convertir (param_1).
+ * @param p_dest_buffer Búfer de destino en memoria RAM donde se dibujará la string (param_2).
+ * @param base Base numérica de conversión (ej. 10 para decimal, 16 para hexadecimal) (param_3).
+ * @return char* Puntero al inicio de la cadena de texto numérica ya formateada y corregida.
+ */
+char* ee_itoa(s32 value, char* p_dest_buffer, s64 base) {
+	if (p_dest_buffer == NULL || base < 2 || base > 36) {
+		return p_dest_buffer;
+	}
+
+	const char* digits_map = "0123456789abcdefghijklmnopqrstuvwxyz";
+	u32 target_value = (u32)value;
+
+	// Si es base 10 y el número es negativo, procesa el valor absoluto
+	if (value < 0 && base == 10) {
+		target_value = (u32)(-value);
+	}
+
+	s32 iterator = 0;
+	s32 current_idx = 0;
+
+	// Extracción consecutiva de residuos lógicos según la base numérica
+	do {
+		current_idx = iterator;
+		iterator++;
+
+		p_dest_buffer[current_idx] = digits_map[target_value % (u32)base];
+		target_value = target_value / (u32)base;
+
+	} while (target_value != 0);
+
+	// Si el valor era negativo, inyecta el prefijo de signo de reversa
+	if (value < 0 && base == 10) {
+		p_dest_buffer[iterator] = '-';
+		iterator = current_idx + 2;
+	}
+
+	p_dest_buffer[iterator] = '\0'; // Marcador de fin de string
+
+	// Invoca a tu subrutina de inversión para corregir el orden de los dígitos
+	return ee_strrev(p_dest_buffer);
+}
+
+/**
+ * @brief Invierte el orden de los caracteres de una cadena de texto de forma directa en la memoria (String Reverse).
+ * Utilizado por el motor para corregir la orientación de dígitos generados de reversa por los convertidores numéricos.
+ * Dirección original en Ghidra: 0x001184D0 (PAL)
+ *
+ * @param p_str Puntero a la cadena de caracteres que se va a invertir (param_1).
+ * @return char* Retorna el puntero inicial de la cadena ya invertida.
+ */
+char* ee_strrev(char* p_str) {
+	if (p_str == NULL || *p_str == '\0') {
+		return p_str;
+	}
+
+	// 1. Calcula manualmente la longitud del string (Equivalente al bucle for de la PS2)
+	s32 length = 0;
+	while (p_str[length] != '\0') {
+		length++;
+	}
+
+	s32 left_idx = 0;
+	s32 right_idx = length - 1;
+
+	// 2. Intercambio simétrico de caracteres desde los extremos hacia el centro (Punteros cruzados)
+	while (left_idx < right_idx) {
+		char temp = p_str[left_idx];
+		p_str[left_idx] = p_str[right_idx];
+		p_str[right_idx] = temp;
+
+		left_idx++;
+		right_idx--;
+	}
+
+	return p_str;
+}
+
+/**
+ * @brief Aplica redondeo aritmético directo sobre una cadena de texto ASCII que representa un número flotante.
+ * Maneja el arrastre de desbordamiento (efecto dominó) si se encuentran dígitos '9' consecutivos.
+ * Dirección original en Ghidra: 0x00118460 (PAL)
+ *
+ * @param p_str_buffer Puntero al búfer de caracteres de la string numérica (param_1).
+ * @param precision_index Posición o índice del dígito donde se aplica el corte de redondeo (param_2).
+ * @return s32 Retorna 0 si el desbordamiento desborda el inicio del string, o 1 si el redondeo fue exitoso.
+ */
+s32 txt_round_ascii_digits(char* p_str_buffer, s64 precision_index) {
+	if (p_str_buffer == NULL || precision_index <= 0) {
+		return 1;
+	}
+
+	s32 index = (s32)precision_index - 1;
+	char* p_target_char = p_str_buffer + index;
+
+	// Regla de redondeo estándar: Si el dígito de evaluación es mayor a '4' (5, 6, 7, 8, 9)
+	if (*p_target_char > '4') {
+		*p_target_char = '0'; // Pone a cero el dígito evaluado
+
+		// Bucle de arrastre: Propaga el acarreo hacia la izquierda mientras encuentre caracteres '9'
+		while (1) {
+			index--;
+			p_target_char--;
+
+			if (index < 1 || *p_target_char != '9') {
+				break;
+			}
+			*p_target_char = '0';
+		}
+
+		p_target_char = p_str_buffer + index;
+		if (*p_target_char == '9') {
+			return 0; // Indica desbordamiento fuera de los límites iniciales del string
+		}
+
+		// Incrementa de forma segura el valor del carácter ASCII actual (ej. '7' + 1 = '8')
+		*p_target_char = *p_target_char + 1;
+	}
+
+	return 1;
+}
+
+/**
+ * @brief Escribe texto de forma segmentada dentro de un búfer secundario de acumulación alterno.
+ * Realiza un vaciado automático (autoflush) al llenarse o de forma explícita mediante flags.
+ * Dirección original en Ghidra: 0x00118BC0 (PAL)
+ *
+ * @param log_level Nivel de prioridad/canal (param_1)
+ * @param p_srcString Texto a escribir (param_2)
+ * @param write_len Cantidad de caracteres/bytes a procesar (param_3)
+ * @param flush_flag Si es 1, fuerza el vaciado del búfer de forma inmediata (param_4)
+ * @return u32 Cantidad de bytes procesados con éxito.
+ */
+u32 sys_log_write_buffered_alt(s32 log_level, const char* p_srcString, u32 write_len, s32 flush_flag) {
+	u32 bytes_processed = 0;
+
+	// Control de vaciado explícito alternativo (Flush)
+	if (flush_flag == 1) {
+		sys_log_dispatch_message(log_level, g_log_static_buffer_alt, g_log_buffer_count_alt);
+		g_log_buffer_count_alt = 0;
+		g_log_buffer_write_ptr_alt = g_log_static_buffer_alt;
+	}
+	else {
+		const char* p_src = p_srcString;
+
+		if (write_len != 0) {
+			do {
+				// Copia el carácter actual al búfer estático secundario
+				*g_log_buffer_write_ptr_alt = *p_src;
+				g_log_buffer_count_alt++;
+				g_log_buffer_write_ptr_alt++;
+
+				// Autoflush automático alterno si supera los 128 bytes (0x7f)
+				if (g_log_buffer_count_alt > 0x7F) {
+					s32 dispatch_status = sys_log_dispatch_message(log_level, g_log_static_buffer_alt, g_log_buffer_count_alt);
+					g_log_buffer_write_ptr_alt = g_log_static_buffer_alt;
+					g_log_buffer_count_alt = 0;
+
+					if (dispatch_status == 0) {
+						g_log_buffer_count_alt = 0;
+						return 0; // Detener flujo si el despachador falla
+					}
+				}
+
+				bytes_processed++;
+				p_src = p_srcString + bytes_processed;
+
+			} while (bytes_processed < write_len);
+		}
+	}
+
+	return bytes_processed;
+}
+
+/**
+ * @brief Envoltorio de interfaz pública para recuperar la tabla de propiedades de localización de caracteres.
+ * Dirección original en Ghidra: 0x00115228 (PAL)
+ *
+ * @return const void** Puntero directo al arreglo de localización del sistema.
+ */
+const void** ee_ctype_interface_wrapper(void) {
+	// Delega y retorna de forma directa la consulta a la subrutina del núcleo
+	return ee_get_ctype_table_ptr();
+}
+
+/**
+ * @brief Punto de entrada público para el despacho de fallos de aserción en el motor.
+ * Formatea la alerta tipográfica y cede el control al manejador definitivo de detención del sistema.
+ * Dirección original en Ghidra: 0x00115E38 (PAL)
+ *
+ * @param p_file Ruta del archivo original de código fuente (param_1).
+ * @param line Número de línea física del error (param_2).
+ * @param p_assertion Expresión lógica de la condición que falló (param_3).
+ */
+void sys_assert_dispatch(const char* p_file, s32 line, const char* p_assertion,
+	long p4, long p5, long p6, long p7, long p8) {
+
+	// 1. Recopila e inyecta la información formateada en los logs del kernel
+	s32* p_error_stream = *(s32**)(0x00133EF4 + 0xC);
+	game_sprintf(p_error_stream, "assertion \"%s\" failed: file \"%s\", line %d\n", p_assertion, p_file, line);
+
+	// 2. Transfiere el flujo de ejecución al manejador definitivo de pánico y congelamiento
+	sys_assert_fail(p_assertion, p_file, line);
+}
+
+
+// Prototipo de la función de inicialización de memoria que acabas de conectar
+void kernel_hardware_memory_init(void);
+
+// Prototipos requeridos del Kernel de Sony
+long GetMemorySize(void);
+void _InitTLB(void);
+
+// Referencia a tu función de sincronización ya mapeada
+long kernel_tlb_cache_sync(void);
+
+// Dirección física del arreglo de punteros de localización en la PS2
+const u32* g_locale_ctype_array = (const u32*)0x0013A388;
+
+/**
+ * @brief Recupera el puntero base del arreglo de tablas de localización de caracteres (CTYPE Pointer Array).
+ * Apunta internamente a las matrices de conversión de tipos utilizadas por las funciones de strings.
+ * Dirección original en Ghidra: 0x00115210 (PAL)
+ *
+ * @return const void** Puntero a la dirección del arreglo de localización.
+ */
+const void** ee_get_ctype_table_ptr(void) {
+	// Retorna de forma directa el acceso al mapa de punteros del sistema
+	return (const void**)g_locale_ctype_array;
+}
+
+/**
+ * @brief Evalúa la memoria RAM física de la consola y determina el flujo de inicialización del TLB.
+ * Sincroniza la caché si se detecta el entorno comercial estándar de 32 MB de la PS2.
+ * Dirección original en Ghidra: 0x0011F130 (PAL)
+ */
+void kernel_hardware_memory_init(void) {
+	long memory_size = 0;
+
+	// En emulación o port moderno, adaptamos la lectura del hardware original de la PS2:
+#if defined(PLATFORM_PS2)
+	memory_size = GetMemorySize();
+#else
+	memory_size = 0x2000000; // Forzamos por defecto el flujo comercial de 32MB para el port nativo
+#endif
+
+	// 0x2000000 bytes equivalen exactamente a los 32 MB de RAM de la PlayStation 2 comercial
+	if (memory_size == 0x2000000) {
+		// Invoca a tu rutina de sincronización y validación de páginas de caché
+		kernel_tlb_cache_sync();
+	}
+	else {
+		// Inicialización alternativa si se detecta un Kit de Desarrollo (PS2 TOOL / 64MB)
+#if defined(PLATFORM_PS2)
+		_InitTLB();
+#endif
+	}
+}
+
+/**
+ * @brief Invoca una parada suave y segura del sistema enviando un código de salida limpio (0).
+ * Utilizado por el motor para interrupciones controladas del flujo de ejecución.
+ * Dirección original en Ghidra: 0x00131D08 (PAL)
+ */
+void sys_safe_exit_stub(void) {
+	// Despacha un aborto con código de éxito (0), forzando el reinicio del TLB antes de salir
+	sys_kernel_panic_abort(0);
+}
+
+/**
+ * @brief Detiene la ejecución del juego ante un error crítico (Kernel Panic).
+ * Fuerza una reinicialización del subsistema de memoria TLB para estabilizar el hardware antes de salir.
+ * Dirección original en Ghidra: 0x0011FA20 (PAL)
+ *
+ * @param exit_code Código de estado de error que se reportará al sistema (param_1).
+ */
+void sys_kernel_panic_abort(s32 exit_code) {
+	// Intenta reiniciar y limpiar las tablas de traducción de memoria RAM de la PS2
+	kernel_hardware_memory_init();
+
+	// Cierra el proceso de golpe de forma portable en sistemas modernos
+	_Exit(exit_code);
+}
+
+// ============================================================================
+// SUBSISTEMA DE CONTROL Y GESTIÓN DE MEMORIA (KERNEL)
+// ============================================================================
+
+void SYNC(int type);
+void RFU086_WaitEvnetFlag(void);
+bool txt_format_scientific_wrapper(const u8* format_ptr, ...);
+
+// Declaración oficial de tu manejador de pánico
+void sys_kernel_panic_abort(s32 exit_code);
+
+/**
+ * @brief Gestiona la sincronización, vaciado e invalidación de páginas de la memoria caché TLB de la PS2.
+ * Dirección original en Ghidra: 0x0011F170 (PAL)
+ */
+long kernel_tlb_cache_sync(void) {
+	s32 total_pages = g_tlb_wired_index + g_tlb_bound_index;
+
+	txt_format_scientific_wrapper((const u8*)0x13AC50, (long)(g_tlb_wired_index - 1), (long)g_tlb_wired_index, (long)(total_pages - 1));
+
+#if defined(PLATFORM_PS2)
+	SYNC(0x10);
+#endif
+
+	s64 iterator = 0;
+
+	// Bloque de control A: Desbordamiento de entradas fijas
+	if (g_tlb_wired_index > 0x30) {
+		txt_format_scientific_wrapper((const u8*)0x13AC88);
+		sys_kernel_panic_abort(1); // ¡CAMBIO AQUÍ! Conexión con tu función revelada
+	}
+
+	while (iterator < g_tlb_wired_index) {
+#if defined(PLATFORM_PS2)
+		RFU086_WaitEvnetFlag();
+#endif
+		iterator++;
+	}
+
+	// Bloque de control B: Verifica la segunda sección de páginas
+	if (total_pages > 0x30) {
+		txt_format_scientific_wrapper((const u8*)0x13ACA0);
+		sys_kernel_panic_abort(1); // ¡CAMBIO AQUÍ! Conexión con tu función revelada
+	}
+
+	while (iterator < total_pages) {
+#if defined(PLATFORM_PS2)
+		RFU086_WaitEvnetFlag();
+#endif
+		iterator = iterator + 1;
+	}
+
+#if defined(PLATFORM_PS2)
+	SYNC(0x10);
+#endif
+
+	g_tlb_status_sync = (s32)iterator;
+
+	// Bloque de control C: Banderas extras de hardware
+	if (g_tlb_extra_flags > 0) {
+		s32 extra_limit = (s32)iterator + g_tlb_extra_flags;
+		if (extra_limit > 0x30) {
+			txt_format_scientific_wrapper((const u8*)0x13ACB8);
+			sys_kernel_panic_abort(1); // ¡CAMBIO AQUÍ! Conexión con tu función revelada
+		}
+		while (iterator < extra_limit) {
+#if defined(PLATFORM_PS2)
+			RFU086_WaitEvnetFlag();
+#endif
+			iterator++;
+		}
+	}
+
+	for (; iterator < 0x30; iterator++) {
+#if defined(PLATFORM_PS2)
+		RFU086_WaitEvnetFlag();
+#endif
+	}
+
+	return (long)((s32)iterator << 13);
+}
+
+// Prototipo requerido de la función maestra que completamos previamente
+s64 ee_strtoll(s32* p_error_out, const char* p_srcString, char** p_end_ptr, s32 base);
+
+/**
+ * @brief Envoltorio simplificado para convertir texto a entero de 64 bits (Equivalente portable a atoll).
+ * Pasa de forma automática el puntero de error global del sistema a la rutina ee_strtoll.
+ * Dirección original en Ghidra: 0x001175F0 (PAL)
+ *
+ * @param p_srcString Cadena de texto a convertir (param_1).
+ * @param p_end_ptr Puntero opcional donde se almacena el final de la lectura (param_2).
+ * @param base Base numérica (param_3).
+ * @return ulong El número de 64 bits resultante tratado como entero sin signo en el retorno.
+ */
+u64 ee_atoll_wrapper(const char* p_srcString, char** p_end_ptr, s32 base) {
+	// Utiliza el puntero global de errores del hilo del kernel (PTR_DAT_00133ef4)
+	s32* p_global_errno = (s32*)0x00133EF4;
+
+	// Despacha la operación de manera directa a nuestra función maestra
+	return (u64)ee_strtoll(p_global_errno, p_srcString, p_end_ptr, base);
+}
+
+/**
+ * @brief Convierte una cadena de caracteres a un valor entero de 64 bits con signo (String to Int64).
+ * Reconstrucción portable que preserva los límites lógicos y códigos de error (ERANGE / 0x22) del SDK de PS2.
+ * Dirección original en Ghidra: 0x00117278 (PAL)
+ *
+ * @param p_error_out Puntero donde se almacena el código de error del sistema (param_1 / errno).
+ * @param p_srcString Cadena de texto que contiene el número a convertir (param_2).
+ * @param p_end_ptr Puntero opcional donde se almacena el final de la lectura (param_3).
+ * @param base Base numérica del número (0 para detección automática, 8, 10 o 16) (param_4).
+ * @return s64 El número entero de 64 bits resultante.
+ */
+s64 ee_strtoll(s32* p_error_out, const char* p_srcString, char** p_end_ptr, s32 base) {
+	if (p_srcString == NULL) {
+		return 0;
+	}
+
+	// En la PS2 real, esto requiere mapear caracteres vía la tabla de banderas &PTR_DAT_0013a281,
+	// calcular límites de overflow usando math_udiv64, y acumular dígitos con math_mul64.
+	// De forma portable y moderna, delegamos la conversión exacta al runtime nativo:
+
+	char* local_end_ptr = NULL;
+
+	// Limpia o inicializa la variable local de errores antes de la llamada
+#if defined(PLATFORM_PS2)
+// Registro interno de errores
+#else
+	errno = 0;
+#endif
+
+	s64 result = strtoll(p_srcString, &local_end_ptr, base);
+
+	// Mapeo fiel del control de desbordamiento (Overflow / ERANGE = 0x22)
+	if (errno == ERANGE) {
+		if (p_error_out != NULL) {
+			*p_error_out = 0x22; // Inyecta el error de rango (34 decimal) esperado por el motor
+		}
+	}
+
+	// Si el programador del juego solicitó el puntero de parada, lo asigna de vuelta
+	if (p_end_ptr != NULL) {
+		*p_end_ptr = (local_end_ptr != NULL) ? local_end_ptr : (char*)p_srcString;
+	}
+
+	return result;
+}
 
 // Variables globales estimadas de la estructura de la lista en memoria RAM (0x0013CAC0)
 u32 g_list_root_param = 0;

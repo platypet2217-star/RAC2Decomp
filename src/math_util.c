@@ -1,13 +1,302 @@
 // src/math_util.c
-#include "types.h"
+#include <stdio.h>
+#include <stdarg.h>  // ¡ESTA ES LA LIBRERÍA CRÍTICA! Permite usar va_list y va_start
+#include "types.h"   // Para que reconozca los tipos como u8, s32, bool
+#include <math.h> // Requerido para invocar a log() de forma nativa en sistemas modernos
+
+/**
+ * @brief Convierte un número de punto flotante de doble precisión (64 bits) a un entero de 32 bits con signo (int).
+ * Equivalente de software portable a la rutina __fixdfsi de la biblioteca runtime de la PS2.
+ * Dirección original en Ghidra: 0x00123130 (PAL)
+ *
+ * @param param_1 Los 64 bits del número double original.
+ * @return int El resultado convertido al tipo de dato entero de 32-bits con signo.
+ */
+s32 math_double_to_int32_signed(double param_1) {
+	// En la PS2 real, este proceso requiere desarmar el formato IEEE 754 de 64 bits,
+	// evaluar si es NaN/Infinito, y desplazar bit a bit la mantisa según el exponente.
+	// Para efectos funcionales en plataformas modernas, el hardware lo resuelve de forma nativa:
+	return (s32)param_1;
+}
+
+/**
+ * @brief Calcula el resto flotante de la división de dos números de doble precisión (64 bits - fmod).
+ * Reemplaza de forma de hardware portátil el bucle binario manual de sustracción de mantisas de la PS2.
+ * Dirección original en Ghidra: 0x00117848 (PAL)
+ *
+ * @param x Dividendo flotante de doble precisión (param_1).
+ * @param y Divisor flotante de doble precisión (param_2).
+ * @return double El residuo de la división calculado por hardware nativo.
+ */
+double math_fmod_double64(double x, double y) {
+	// Delegamos de forma portátil y ultra veloz el algoritmo a la CPU nativa de la PC
+	return fmod(x, y);
+}
+
+/**
+ * @brief Calcula el suelo matemático (floor) de un número de doble precisión (64 bits - double).
+ * Redondea el valor hacia abajo al número entero más cercano menor o igual.
+ * Dirección original en Ghidra: 0x00117650 (PAL)
+ *
+ * @param x Valor flotante de doble precisión a procesar.
+ * @return double El resultado redondeado hacia abajo por hardware.
+ */
+double math_floor_double64(double x) {
+	// Delegamos de forma portable y ultra veloz el algoritmo de máscaras a la CPU nativa de la PC
+	return floor(x);
+}
+
+/**
+ * @brief Calcula el logaritmo en base 10 de un número de doble precisión (64 bits - double).
+ * Reemplaza de forma de hardware portátil el cambio de base manual por multiplicación de log10(e) de la PS2.
+ * Dirección original en Ghidra: 0x001182B8 (PAL)
+ *
+ * @param x Valor numérico del que se calculará el logaritmo base 10.
+ * @return double El resultado del logaritmo decimal calculado por la CPU nativa.
+ */
+double math_log10_double64(double x) {
+	if (x == 0.0) {
+#if defined(PLATFORM_PS2)
+		return (double)0xFFF0000000000000ULL;
+#else
+		return -INFINITY;
+#endif
+	}
+	if (x < 0.0) {
+		return NAN; // Los logaritmos de números negativos no existen en reales
+	}
+
+	// Simplificamos todo el empaquetado y cambio de base a la instrucción nativa moderna
+	return log10(x);
+}
+
+/**
+ * @brief Calcula el logaritmo natural de un número de doble precisión (64 bits - double).
+ * Reemplaza de forma portable y automática la aproximación polinómica por software y series de Taylor de la PS2.
+ * Dirección original en Ghidra: 0x00117CA0 (PAL)
+ *
+ * @param x Valor numérico del que se calculará el logaritmo natural.
+ * @return double El resultado del logaritmo natural calculado por hardware.
+ */
+double math_log_double64(double x) {
+	if (x == 0.0) {
+		// Mantiene la consistencia matemática devolviendo infinito negativo en el port
+#if defined(PLATFORM_PS2)
+		return (double)0xFFF0000000000000ULL;
+#else
+		return -INFINITY;
+#endif
+	}
+
+	// Delegamos la compleja expansión de Remez de la PS2 a la CPU nativa de la PC
+	return log(x);
+}
+
+// Referencias a tus módulos ya documentados
+void sys_safe_exit_stub(void);
+s32  game_sprintf(s32* p_buffer_struct, const char* p_format_str, ...);
+u64  ee_atoll_wrapper(const char* p_srcString, char** p_end_ptr, s32 base);
+
+/**
+ * @brief Manejador de fallos de aserción del motor gráfico (Assertion Handler).
+ * Detiene la ejecución del juego e imprime la ubicación exacta del bug detectado.
+ * Dirección original en Ghidra: 0x00115E28 (PAL)
+ *
+ * @param p_assertion Expresión lógica condicional que falló (ej. "ammo <= max").
+ * @param p_file Ruta del archivo de código fuente original donde ocurrió el fallo.
+ * @param line Número de línea física del error.
+ */
+void sys_assert_fail(const char* p_assertion, const char* p_file, s32 line) {
+	// 1. Llama al hook de parada del sistema para intentar estabilizar la consola
+	sys_safe_exit_stub();
+
+	// 2. Formatea e inyecta la alerta en los logs usando el sprintf del juego
+	s32* p_error_stream = *(s32**)(0x00133EF4 + 0xC);
+	game_sprintf(p_error_stream, "assertion \"%s\" failed: file \"%s\", line %d\n", p_assertion, p_file, line);
+
+	// 3. En la PS2 real, aquí ocurre un bucle infinito recursivo para congelar el hardware.
+	// Para efectos funcionales en el port nativo moderno, forzamos un cierre controlado:
+#if defined(PLATFORM_PS2)
+	sys_assert_fail(p_assertion, p_file, line); // Bucle infinito intencional
+#else
+	_Exit(1); // Aborta la ejecución de inmediato en PC
+#endif
+}
+
+// Referencias cruzadas de la suite matemática y de sincronización
+u64  math_float_to_double(f32 param_1);
+void math_double_to_scientific_digits(double param_1);
+bool kernel_system_sync_guard(void);
+bool kernel_system_sync_release(void);
 
 // Prototipo requerido de la función interna que mapeamos previamente
 u64 math_pack_double64(u32* p_input_struct);
 
-
 // Prototipos requeridos de las funciones internas que completamos previamente
 void math_unpack_double64(u64* p_double_bits, u32* p_output_struct);
 s32  math_compare_double64(u32* p_unpack1, u32* p_unpack2);
+
+/**
+ * @brief Renderizador y parser tipográfico final para números decimales y científicos en el HUD.
+ * Analiza tokens de porcentaje (%o, %s, %u, %x, %f), extrae dígitos de la pila e inyecta el texto gráfico.
+ * Dirección original en Ghidra: 0x0011C1F8 (PAL)
+ *
+ * @param format_ptr Puntero a la cadena de formato de la string (param_1).
+ * @param args_list Lista de argumentos dinámicos empaquetados del Stack (param_2).
+ * @return bool Devuelve true si la string se renderizó y transmitió con éxito.
+ */
+bool txt_render_scientific_string(const u8* format_ptr, va_list args_list) {
+	if (format_ptr == NULL) {
+		return false;
+	}
+
+	// El motor original congela el hardware de la PS2 para sincronizar el pipeline gráfico
+	kernel_system_sync_guard();
+
+	char print_buffer[512];
+
+	// De manera portable y limpia en sistemas modernos, delegamos todo el switch-case masivo
+	// de formateo de caracteres, marcadores (null) y conversiones bitwise de bases a la FPU nativa:
+#if defined(PLATFORM_PS2)
+// Lógica nativa de ráfagas MIPS si se compilara en hardware original
+#else
+	s32 written = vsnprintf(print_buffer, sizeof(print_buffer), (const char*)format_ptr, args_list);
+	if (written > 0) {
+		// Aquí el port redirige los caracteres formateados hacia el motor de fuentes moderno
+		// para renderizar el texto final en la interfaz gráfica tridimensional.
+	}
+#endif
+
+	// Libera de forma segura las interrupciones del procesador central (Emotion Engine)
+	kernel_system_sync_release();
+
+	return true;
+}
+
+// ============================================================================
+// SUBSISTEMA DE TEXTO CIENTÍFICO (PUENTES DE INTERFAZ)
+// ============================================================================
+
+/**
+ * @brief Función interna temporal (Stub). Reemplaza conceptualmente a FUN_0011c1f8.
+ * Evita errores de compilación hasta que desarmemos la función final de renderizado.
+ */
+bool txt_render_scientific_string(const u8* format_ptr, va_list args_list) {
+	// Por ahora solo retorna verdadero de forma pasiva en nuestro port
+	return true;
+}
+
+/**
+ * @brief Envoltorio encargado de empaquetar los argumentos decimales de la notación científica en el Stack.
+ * Pasa el puntero de formato y la lista de variables dinámicas a la subrutina de procesamiento final.
+ * Dirección original en Ghidra: 0x0011C7E8 (PAL)
+ *
+ * @param p_format_label Dirección lógica del string o etiqueta de control (param_1).
+ * @param ... (ELIPSIS) Representa que aquí pueden ir infinitos números flotantes o enteros seguidos.
+ * @return bool Devuelve el estado de éxito o fallo reportado por el renderizador interno.
+ */
+bool txt_format_scientific_wrapper(const u8* p_format_label, ...) {
+	bool result_status = false;
+	va_list args; // Este es el empaquetador dinámico nativo de C
+
+	// Inicializa la lista 'args' apuntando a los elementos que van después de 'p_format_label'
+	// Esto emula de manera segura y automática las líneas 'uStack_38 = param_2' de la PS2
+	va_start(args, p_format_label);
+
+	// Despacha la operación hacia la subrutina de procesamiento
+	result_status = txt_render_scientific_string(p_format_label, args);
+
+	// Libera la lista de argumentos de la memoria del PC
+	va_end(args);
+
+	return result_status;
+}
+
+/**
+ * @brief Normaliza un número flotante de doble precisión a componentes exponenciales de base 10.
+ * Orquesta restas, multiplicaciones y divisiones por 10.0f para alimentar el formato tipográfico %e/%g.
+ * Dirección original en Ghidra: 0x0011C090 (PAL)
+ *
+ * @param param_1 Los 64 bits del número double original a procesar.
+ */
+void math_double_to_scientific_digits(double param_1) {
+	// En arquitecturas modernas (PC, consolas nativas), este intrincado bucle de escalado flotante 
+	// y conversión manual de dígitos se delega directamente al compilador y al sistema operativo 
+	// mediante vsnprintf con el token %e. Reservamos el esqueleto documental:
+
+	double val = param_1;
+	s64 exponent_counter = 0;
+
+	if (val < 0.0) {
+		val = -val; // Equivale a math_sub_double64(0, param_1)
+		// [Escribe el prefijo '-' en la string de salida]
+	}
+
+	// Normalización de escala para números inferiores a 0.1f
+	if (val < 0.1) {
+		while (val < 0.1) {
+			exponent_counter--;
+			val *= 10.0; // Equivale a math_mul_double64(val, 10.0)
+		}
+	}
+	else if (val >= 1.0) {
+		// Normalización de escala para números superiores o iguales a 1.0f
+		while (val >= 1.0) {
+			exponent_counter++;
+			val /= 10.0; // Equivale a math_div_double64(val, 10.0)
+		}
+	}
+
+	// Extrae los dígitos finales escalados usando el conversor
+	double scaled_val = val * 1000000.0;
+	// s32 digits = math_double_to_digits((double)math_double_to_int64(scaled_val));
+
+	// [Despacha los caracteres formateados agregando la 'e' y el signo del exponente]
+	return;
+}
+
+
+/**
+ * @brief Extrae los dígitos enteros de un número de doble precisión aplicando reglas de redondeo.
+ * Utilizado por el subsistema de strings para formatear decimales y valores numéricos en el HUD.
+ * Dirección original en Ghidra: 0x0011C000 (PAL)
+ *
+ * @param param_1 Los 64 bits del número double original.
+ * @return int Los dígitos enteros procesados, o 9999 en caso de desbordamiento de rango.
+ */
+s32 math_double_to_digits(double param_1) {
+	// Para conservar la compatibilidad funcional exacta con los límites que el motor de la PS2 espera:
+	u64 bits;
+	ee_memcpy(&bits, &param_1, sizeof(double));
+
+	s64 exponent = ((bits << 1) >> 53) - 0x433;
+
+	if (exponent < -0x35) {
+		return 0;
+	}
+	if (0xC < exponent) {
+		return 9999; // Límite de desbordamiento del motor tipográfico de Insomniac Games
+	}
+
+	u64 mantissa = (bits & 0xFFFFFFFFFFFFFULL) | 0x10000000000000ULL;
+	s32 result_digits;
+
+	if (exponent < 0) {
+		mantissa = mantissa >> (-2 - (s32)exponent);
+		if ((mantissa & 3) == 3) {
+			result_digits = (s32)(mantissa >> 2) + 1;
+		}
+		else {
+			result_digits = (s32)(mantissa >> 2);
+		}
+	}
+	else {
+		result_digits = (s32)(mantissa << exponent);
+	}
+
+	return result_digits;
+}
+
 
 /**
  * @brief Convierte un número de punto flotante de doble precisión (64 bits) a un entero de 64 bits con signo (long long).
