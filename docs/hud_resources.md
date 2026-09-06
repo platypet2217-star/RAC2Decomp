@@ -88,3 +88,8 @@ Este documento centraliza las direcciones de memoria RAM de cadenas de texto (st
 | **`0x001AE078`** | `char[]` (String) | `"QSelIcon"` | Icono base central del menú rápido de selección de armas. |
 | **`0x001AE088`** | `char[]` (String) | `"QSelBI%d"` | Máscara de texto formateada por vsnprintf para inicializar las ranuras del inventario radial en ráfaga. |
 
+
+| Dirección de Memoria | Tipo de Dato | Valor Comercial / Cadena | Propósito / Uso Estimado en el Motor |
+| :--- | :--- | :--- | :--- |
+| **`0x001AE098`** | `char[]` (String) | `"QSelIco%d"` | Plantilla dinámica utilizada por vsnprintf para inicializar las texturas de los íconos de las armas dentro de cada ranura del menú radial. |
+
