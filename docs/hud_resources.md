@@ -59,3 +59,32 @@ Este documento centraliza las direcciones de memoria RAM de cadenas de texto (st
 | Dirección de Memoria | Tipo de Dato | Nombre Técnico Estimado | Propósito / Uso Estimado en el Motor |
 | :--- | :--- | :--- | :--- |
 | **`0x0013A388`** | `uint32_t[]` (Array) | `_ctype_b_ptr_array` | Arreglo de punteros de localización. El primer índice (`0x0013A388`) apunta directamente a `0x0013A3C0`, que contiene la matriz real de máscaras de bits de propiedades ASCII (dígitos, espacios, letras) utilizada por ee_strtoll. |
+
+## Segmento del Canvas Principal del HUD (0x001AE6D8 - 0x001AE700)
+
+| Dirección de Memoria | Tipo de Dato | Valor Comercial / Cadena | Propósito / Uso Estimado en el Motor |
+| :--- | :--- | :--- | :--- |
+| **`0x001AE6D8`** | `char[]` (String) | `"HudBase"` / `"HudCanvas"`| Contenedor invisible maestro o lienzo base de coordenadas del HUD. |
+| **`0x001AE6E8`** | `char[]` (String) | `"HealthBarOutline"`| Recurso del contorno estético del medidor de vida (Nanotech). |
+| **`0x001AE6F8`** | `char[]` (String) | `"HealthBarFill"`   | Recurso visual del relleno dinámico de la barra de Nanotech. |
+
+
+# Se debe limpiar lo de abajo, después lo arreglo xD
+
+## Segmento de Inicialización de Letreros y Medidores del Core (0x001AE700 - 0x001AE755)
+
+| Dirección de Memoria | Tipo de Dato | Valor Comercial / Cadena | Propósito / Uso Estimado en el Motor |
+| :--- | :--- | :--- | :--- |
+| **`0x001AE700`** | `char[]` (String) | `"WeaponName"` / `"AmmoText"` | Texto dinámico que despliega el nombre del arma o la cantidad de balas en el HUD. |
+| **`0x001AE710`** | `char[]` (String) | `"WeaXP"` | Componente visual de la barra de nivel o experiencia del arma en uso. |
+| **`0x001AE720`** | `char[]` (String) | `"AmmoIcon"` | Textura o silueta principal de la bala/proyectil del arma seleccionada. |
+| **`0x001AE730`** | `char[]` (String) | `"AmmoIconBack"` | Fondo o sombra de contraste para el ícono de la munición. |
+| **`0x001AE740`** | `char[]` (String) | `"BoltText"` | Letrero numérico que renderiza la cantidad acumulada de guitones (billetera). |
+
+## Plantillas Dinámicas del Menú Radial Quick Select (0x001AE075 - 0x001AE090)
+
+| Dirección de Memoria | Tipo de Dato | Valor Comercial / Cadena | Propósito / Uso Estimado en el Motor |
+| :--- | :--- | :--- | :--- |
+| **`0x001AE078`** | `char[]` (String) | `"QSelIcon"` | Icono base central del menú rápido de selección de armas. |
+| **`0x001AE088`** | `char[]` (String) | `"QSelBI%d"` | Máscara de texto formateada por vsnprintf para inicializar las ranuras del inventario radial en ráfaga. |
+

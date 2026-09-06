@@ -6,6 +6,320 @@
 void inv_set_weapon_slot_data(u32 p_asset_ptr, u32 current_ammo, u32 max_ammo, u32 weapon_id, u32 experience_val, void* p_matrix_base, s32 slot_index);
 void inv_update_weapon_visual_pointers(u32 p_primary_asset, u32 p_secondary_asset, void* p_array_base, s32 slot_index);
 
+// Prototipo de tu indexador avanzado requerido
+void inv_set_extended_ammo_slot_data(u32 ammo_type, u32 current_ammo, u32 max_ammo, u32 upgrade_state, void* p_matrix_base, s32 slot_index, s32 group_index);
+
+// Prototipo de tu configurador posicional plano
+void hud_set_widget_position_2d(u32* p_widget, s32 x_coord, s32 y_coord);
+
+// Dirección física de la tabla global de estado de armas en la RAM de la PS2
+#define INVENTORY_WEAPONS_DATA_PTR     ((const u8*)0x0019B2F8)
+#define MAX_WEAPONS_LIMIT_CONFIG       28 // 0x1B + 1 posiciones de ranuras base
+
+// Dirección global de la memoria RAM de la PS2 que almacena el ID del arma activa
+#define GLOBAL_ACTIVE_WEAPON_ID_PTR    ((const u8*)0x001396C8)
+
+// Definición de recursos estáticos del Canvas Principal
+#define RECURSO_HUD_CANVAS          ((const char*)0x001AE6D8) // "HudBase"
+#define RECURSO_HEALTH_OUTLINE      ((const char*)0x001AE6E8) // "HealthBarOutline"
+#define RECURSO_HEALTH_FILL         ((const char*)0x001AE6F8) // "HealthBarFill"
+
+// Definiciones del set extendido de recursos estáticos del HUD
+#define RECURSO_WEAPON_NAME         ((const char*)0x001AE700) // "WeaponName"
+#define RECURSO_WEAPON_XP           ((const char*)0x001AE710) // "WeaXP"
+#define RECURSO_AMMO_ICON           ((const char*)0x001AE720) // "AmmoIcon"
+#define RECURSO_AMMO_ICON_BACK      ((const char*)0x001AE730) // "AmmoIconBack"
+#define RECURSO_BOLT_TEXT           ((const char*)0x001AE740) // "BoltText"
+#define FORMATO_SLOT_RADIAL         ((const char*)0x001AE088) // "QSelBI%d"
+#define FORMATO_ICONO_RADIAL    ((const char*)0x001AE098) // "QSelIco%d"
+
+// Prototipos intermedios del ecosistema requeridos
+void  hud_link_widget_text(u32* p_widget, const char* text_ptr, long pool, long p4, long p5, long p6, long p7, long p8);
+void  hud_init_meter_widget(u32* p_widget, const char* text_ptr, long pool, long p4, long p5, long p6, long p7, long p8);
+void  hud_update_widget_context(u32* p_widget, u32* p_new_resource);
+s32   txt_vsnprintf_internal(char* p_dest_buffer, const char* p_format_str, va_list args_list);
+void* ee_memset(void* p_dest, s32 value, u32 size);
+
+/**
+ * @brief Recupera el identificador único (ID) del arma que el jugador tiene equipada actualmente en tiempo real.
+ * Utilizada por el subsistema de munición y renderizado del HUD para sincronizar los contadores visuales.
+ * Dirección original en Ghidra: 0x002B18D8 (PAL)
+ *
+ * @return u8 ID numérico del arma activa (ej. 0 = Llave, 1 = Lancer, etc.).
+ */
+u8 inv_get_active_weapon_id(void) {
+	// Retorna de forma directa el byte de estado global de la RAM
+	return *GLOBAL_ACTIVE_WEAPON_ID_PTR;
+}
+
+// Referencias a tus funciones del mismo bloque ya integradas
+s32 inv_count_unlocked_weapons(void);
+u8  inv_get_active_weapon_id(void);
+
+/**
+ * @brief Calcula el desplazamiento espacial o ranuras restantes en el menú radial a partir del arma equipada.
+ * Utiliza el conteo global y el ID activo para coordinar los límites de rotación de la interfaz Quick Select.
+ * Dirección original en Ghidra: 0x002B18E8 (PAL)
+ *
+ * @return s32 Distancia o ranuras restantes indexadas (Clamped entre 0 y 40).
+ */
+s32 inv_get_quick_select_remaining_space(void) {
+	// 1. Recupera el total de armas desbloqueadas y el ID del armamento en mano
+	s32 total_weapons = inv_count_unlocked_weapons();
+	u8 active_weapon_id = inv_get_active_weapon_id();
+
+	// 2. Calcula la distancia diferencial en el anillo de selección
+	s32 remaining_slots = total_weapons - (s32)active_weapon_id;
+
+	// Regla de salvaguarda contra desbordamientos negativos
+	if (remaining_slots < 0) {
+		remaining_slots = 0;
+	}
+
+	// Aplica el clamp estándar de 40 posiciones (0x28) del HUD de Insomniac
+	s32 clamped_offset = 0x28;
+	if (remaining_slots < 0x29) {
+		clamped_offset = remaining_slots;
+	}
+
+	return clamped_offset;
+}
+
+/**
+ * @brief Cuenta la cantidad total de armas válidas y desbloqueadas actualmente en el inventario del jugador.
+ * Peina la matriz de datos globales aplicando límites de control para definir el tamaño de la interfaz del HUD.
+ * Dirección original en Ghidra: 0x002B1930 (PAL)
+ *
+ * @return s32 Cantidad final de ranuras de armas activas listas para renderizarse (Clamped entre 0 y 40).
+ */
+s32 inv_count_unlocked_weapons(void) {
+	s32 total_active_elements = 0;
+	s32 memory_offset = 0;
+
+	// Bucle general que peina secuencialmente las 28 ranuras de armas del motor de Insomniac
+	for (s32 weapon_idx = 1; weapon_idx <= MAX_WEAPONS_LIMIT_CONFIG; weapon_idx++) {
+		const u8* p_weapon_bytes = INVENTORY_WEAPONS_DATA_PTR + memory_offset;
+
+		// Cada ranura de arma almacena un bloque contiguo de 4 bytes con flags de estado
+		for (s32 byte_idx = 0; byte_idx < 4; byte_idx++) {
+			u8 flag_byte = p_weapon_bytes[byte_idx];
+
+			// Si el flag contiene datos válidos, se contabiliza como un componente activo
+			if (flag_byte != 0) {
+				total_active_elements++;
+			}
+		}
+
+		// Calcula el paso de alineación de memoria indexada para la siguiente ranura (weapon_idx * 4)
+		memory_offset = weapon_idx * 4;
+	}
+
+	// Regla de salvaguarda: El conteo no puede ser menor a cero absoluto
+	if (total_active_elements < 0) {
+		total_active_elements = 0;
+	}
+
+	// Aplica un clamp matemático estricto: El HUD comercial de la PS2 soporta hasta 40 ranuras gráficas (0x28)
+	s32 clamped_count = 0x28;
+	if (total_active_elements < 0x29) {
+		clamped_count = total_active_elements;
+	}
+
+	return clamped_count;
+}
+
+/**
+ * @brief Modifica la posición física de anclaje de los componentes del HUD según el modo de video (4:3 o 16:9/PAL).
+ * Inyecta las coordenadas de píxeles empaquetadas correspondientes para corregir la distorsión de la pantalla.
+ * Dirección original en Ghidra: 0x0034EC58 (PAL)
+ *
+ * @param p_hud_main_struct Dirección base de la estructura central de la interfaz (param_1).
+ * @param video_mode ID del modo de video activo (0 para NTSC/4:3, 1 para PAL/16:9) (param_2).
+ */
+void hud_update_layout_aspect_ratio(u32* p_hud_main_struct, s32 video_mode) {
+	if (p_hud_main_struct == NULL) {
+		return;
+	}
+
+	// El offset 0x15A4 equivale al índice 1385 en enteros de 32 bits (1385 * 4 = 5540 bytes)
+	u8* p_base = (u8*)p_hud_main_struct;
+	*(s32*)(p_base + 0x15A4) = video_mode;
+
+	u32* p_sub_widget = (u32*)(p_base + 0x2A0);
+
+	// Caso A: Modo Estándar NTSC / 4:3 (Valores extraídos de la máscara 0x7567)
+	if (video_mode == 0) {
+		s16 x_pos = 103; // 0x67 en hexadecimal (píxeles horizontales)
+		s16 y_pos = 117; // 0x75 en hexadecimal (píxeles verticales)
+		hud_set_widget_position_2d(p_sub_widget, (s32)x_pos, (s32)y_pos);
+	}
+	// Caso B: Modo Panorámico 16:9 / PAL (Valores extraídos de la máscara 0xEAA2)
+	else if (video_mode == 1) {
+		s16 x_pos = 162; // 0xA2 en hexadecimal
+		s16 y_pos = 234; // 0xEA en hexadecimal
+		hud_set_widget_position_2d(p_sub_widget, (s32)x_pos, (s32)y_pos);
+	}
+}
+
+/**
+ * @brief Configura el multiplicador de capacidad o modificador base del subsistema de munición en el offset 0x18.
+ * Dirección original en Ghidra: 0x0034BCE0 (PAL)
+ *
+ * @param multiplier_val Valor de control o dirección de escala a inyectar (param_1).
+ * @param p_extended_ammo_struct Dirección de memoria base de la subestructura de munición (param_2).
+ */
+void inv_set_ammo_capacity_multiplier(u32 multiplier_val, u32* p_extended_ammo_struct) {
+	if (p_extended_ammo_struct != NULL) {
+		// El offset 0x18 equivale al índice 6 en un arreglo de enteros de 32 bits (6 * 4 = 24 bytes)
+		// Nota: Ghidra invirtió el orden de los argumentos en el descompilador original (param_1 es el valor, param_2 es el puntero)
+		p_extended_ammo_struct[0x06] = multiplier_val;
+	}
+}
+
+/**
+ * @brief Recupera el puntero al vector principal de transformación (Posición) de un widget del HUD.
+ * Lee directamente la dirección física almacenada en el offset +0 de la estructura.
+ * Dirección original en Ghidra: 0x00337AF0 (PAL)
+ *
+ * @param p_widget Dirección base de la estructura del componente de la interfaz (param_1).
+ * @return f32* Puntero al vector de posición (X, Y, Z, W) del widget, o NULL si no está asignado.
+ */
+f32* hud_get_widget_position_vector_ptr(u32* p_widget) {
+	if (p_widget == NULL) {
+		return NULL;
+	}
+
+	// Retorna de forma directa el puntero almacenado en el índice 0 (+0 bytes)
+	return (f32*)(*p_widget);
+}
+
+/**
+ * @brief Configura un estado o atributo en ráfaga indexada de 4 bytes en el offset 0x8C del subsistema de munición.
+ * Dirección original en Ghidra: 0x0034BC70 (PAL)
+ *
+ * @param p_extended_ammo_struct Dirección base de la subestructura de munición (param_1).
+ * @param group_index Índice de la ranura o grupo a modificar en pasos de 4 bytes (param_2).
+ * @param attribute_val Valor de estado, bandera o atributo a inyectar (param_3).
+ */
+void inv_set_ammo_matrix_group_state(void* p_extended_ammo_struct, s32 group_index, u32 attribute_val) {
+	if (p_extended_ammo_struct == NULL) {
+		return;
+	}
+
+	// Calcula el offset exacto aplicando el paso de 4 bytes desplazado a 0x8C
+	u8* p_target_slot = (u8*)p_extended_ammo_struct + (group_index * 4) + 0x8C;
+
+	// Inyecta el valor de control de forma directa
+	*(u32*)p_target_slot = attribute_val;
+}
+
+/**
+ * @brief Configura un puntero de grupo o índice de control en ráfaga indexada de 4 bytes en el offset 0x20 del subsistema de munición.
+ * Dirección original en Ghidra: 0x0034BC28 (PAL)
+ *
+ * @param p_extended_ammo_struct Dirección base de la subestructura de munición (param_1).
+ * @param group_index Índice de la ranura o grupo a modificar en pasos de 4 bytes (param_2).
+ * @param p_group_data Dirección de memoria del bloque de datos o parámetro a enlazar (param_3).
+ */
+void inv_set_ammo_matrix_group_ptr(void* p_extended_ammo_struct, s32 group_index, u32 p_group_data) {
+	if (p_extended_ammo_struct == NULL) {
+		return;
+	}
+
+	// Calcula el offset exacto aplicando el paso de 4 bytes desplazado a 0x20
+	u8* p_target_slot = (u8*)p_extended_ammo_struct + (group_index * 4) + 0x20;
+
+	// Inyecta la dirección o valor de control de forma directa
+	*(u32*)p_target_slot = p_group_data;
+}
+
+/**
+ * @brief Inicializa por defecto y pone a cero el estado del subsistema de la matriz de munición extendida.
+ * Configura los factores flotantes de escala (1.0f) e interpolación fina de cuadros (0.0666f) del HUD.
+ * Dirección original en Ghidra: 0x0034BB38 (PAL)
+ *
+ * @param p_extended_ammo_struct Dirección base de la subestructura de munición (param_1).
+ */
+void inv_reset_extended_ammo_subsystem(u32* p_extended_ammo_struct) {
+	if (p_extended_ammo_struct == NULL) {
+		return;
+	}
+
+	// 1. Limpieza de variables de estado secundarias
+	p_extended_ammo_struct[4] = 0;
+	u32 zero_token = p_extended_ammo_struct[4];
+
+	p_extended_ammo_struct[7] = 0;
+	p_extended_ammo_struct[8] = 0;
+	p_extended_ammo_struct[9] = 0;
+	p_extended_ammo_struct[10] = 0;
+
+	// 2. Inyección de factores de escala (1.0f) y tasa de animación (0x3d88882f = 0.0666667f)
+	p_extended_ammo_struct[3] = 0x3F800000; // 1.0f
+	p_extended_ammo_struct[6] = 0x3D88882F; // 0.0666667f (Tasa de interpolación para 60 FPS)
+
+	p_extended_ammo_struct[0] = 0x3F800000; // Escala X = 1.0f
+	p_extended_ammo_struct[1] = 0x3F800000; // Escala Y = 1.0f
+	p_extended_ammo_struct[2] = 0x3F800000; // Escala Z = 1.0f
+
+	// 3. Vaciado masivo inicial de la cuadrícula tridimensional combinada (Slots 0-1, Grupos 0-1)
+	inv_set_extended_ammo_slot_data(zero_token, zero_token, zero_token, zero_token, (void*)p_extended_ammo_struct, 0, 0);
+	inv_set_extended_ammo_slot_data(zero_token, zero_token, zero_token, zero_token, (void*)p_extended_ammo_struct, 0, 1);
+	inv_set_extended_ammo_slot_data(zero_token, zero_token, zero_token, zero_token, (void*)p_extended_ammo_struct, 1, 0);
+	inv_set_extended_ammo_slot_data(zero_token, zero_token, zero_token, zero_token, (void*)p_extended_ammo_struct, 1, 1);
+}
+
+/**
+ * @brief Configura las estadísticas de munición dentro de la matriz extendida del inventario (Paso multidimensional de 0x10 y 0x30).
+ * Inyecta en ráfaga contigua los parámetros de balas calculando el offset exacto por grupo y ranura.
+ * Dirección original en Ghidra: 0x0034BC38 (PAL)
+ *
+ * @param ammo_type ID o tipo de munición asignada (param_1).
+ * @param current_ammo Cantidad de balas actuales (param_2).
+ * @param max_ammo Capacidad máxima del cargador (param_3).
+ * @param upgrade_state Estado de mejora o nivel del componente (param_4).
+ * @param p_matrix_base Dirección de memoria base de la estructura del inventario (param_5).
+ * @param slot_index Índice de la ranura secundaria (param_6).
+ * @param group_index Índice de la categoría o grupo superior de armas (param_7).
+ */
+void inv_set_extended_ammo_slot_data(u32 ammo_type, u32 current_ammo, u32 max_ammo, u32 upgrade_state,
+	void* p_matrix_base, s32 slot_index, s32 group_index) {
+	if (p_matrix_base == NULL) {
+		return;
+	}
+
+	// Calcula la dirección física de la celda aplicando los pasos indexados de 16 y 48 bytes
+	u8* p_data_cell = (u8*)p_matrix_base + (slot_index * 0x10) + (group_index * 0x30);
+
+	// Almacena en ráfaga contigua las estadísticas en los desplazamientos indicados
+	*(u32*)(p_data_cell + 0x2C) = ammo_type;     // ID/Tipo de Munición
+	*(u32*)(p_data_cell + 0x30) = current_ammo;  // Balas Actuales
+	*(u32*)(p_data_cell + 0x34) = max_ammo;      // Capacidad Máxima
+	*(u32*)(p_data_cell + 0x38) = upgrade_state; // Estado o Multiplicador
+}
+
+/**
+ * @brief Configura un par de datos contiguos de 32 bits (X, Y) dentro de la estructura de control de munición (offset +8).
+ * Utilizado por el bucle de actualización en vivo para inyectar coordenadas de ráfaga o límites del HUD.
+ * Dirección original en Ghidra: 0x0034D1B0 (PAL)
+ *
+ * @param val_x Primer componente o dato de control (param_1).
+ * @param val_y Segundo componente o dato de control contiguo (param_2).
+ * @param p_dest_struct Dirección base de la estructura contenedora (param_3).
+ */
+void hud_set_ammo_widget_context_2d(u32 val_x, u32 val_y, void* p_dest_struct) {
+	if (p_dest_struct != NULL) {
+		// Recupera el puntero físico real almacenado en el desplazamiento +8
+		u32** pp_context_target = (u32**)((u8*)p_dest_struct + 8);
+		u32* p_context = *pp_context_target;
+
+		if (p_context != NULL) {
+			p_context[0] = val_x;   // Almacena en el offset +0 del bloque apuntado
+			p_context[1] = val_y;   // Almacena en el offset +4 del bloque apuntado
+		}
+	}
+}
+
 /**
  * @brief Inicializa por completo el layout visual de la munición y las matrices del inventario de armas.
  * Orquesta el registro de widgets (Fondo, Borde, Texto, Deslizador) y configura las estadísticas base de las ranuras.
@@ -948,54 +1262,401 @@ void hud_link_widget_text(u32* p_widget, const char* text_resource, long param_3
 
 
 /**
- * @brief Inicializa los componentes principales de la interfaz (HUD Master Init).
- * Dirección original en Ghidra: 0x0034D490 (PAL)
+ * @brief Inicializa por completo el núcleo central de los widgets y medidores gráficos del HUD (Parte 1).
+ * Da de alta el lienzo maestro y las coordenadas de la barra de Nanotecnología (vida) en ráfagas vectoriales.
+ * Dirección original en Ghidra: 0x0034B860 / Línea de entrada aproximada (PAL)
  */
-void hud_initialize_main_widgets(u32* p_hudState, s32 p_ammoData, long param_3) {
+void hud_initialize_main_widgets(u32* p_hud_context, s32 state_offset, long p_hud_pool,
+	long p4, long p5, long p6, long p7, long p8) {
 
-	// Líneas 192-193: Flags de estado a cero
-	p_hudState[0x567] = 0;
-	p_hudState[0x568] = 0;
+	// 1. Limpieza de los contadores maestros de refresco del canvas en los offsets +0x567 y +0x568
+	p_hud_context[0x567] = 0;
+	p_hud_context[0x568] = 0;
 
-	// --- SECCIÓN 1: HUD MUNICIÓN Y EXPERIENCIA DE ARMA ---
-	// Línea 195: Fondo del HUD de munición ("BackAmmo" - 0x001ae6d8)
-	hud_register_widget_asset(p_hudState, (const char*)0x001ae6d8, param_3);
+	// Cálculo del offset dinámico de búsqueda de estado de producción de Insomniac
+	s32 state_lookup_id = state_offset + 0x8710;
 
-	// Línea 202: Silueta del indicador de balas ("OutlineAmmo" - 0x001ae6e8)
-	u32* widget_outline_ammo = p_hudState + 0x13;
-	hud_register_widget_asset(widget_outline_ammo, (const char*)0x001ae6e8, param_3);
+	// 2. Registro e inyección de coordenadas del Widget 0 (Lienzo Maestro del HUD)
+	hud_register_widget_asset(p_hud_context, RECURSO_HUD_CANVAS, p_hud_pool, p4, p5, p6, p7, p8);
+	hud_set_state_from_lookup((int)p_hud_context, state_lookup_id, 1);
+	math_set_vector4(10.0f, 10.0f, 0.0f, 0.0f, p_hud_context); // 0x41200000 = 10.0f
 
-	// Línea 206: Barra de experiencia del arma ("WeaXP" - 0x001ae6f8)
-	u32* widget_weapon_xp = p_hudState + 0x26;
-	hud_register_widget_asset(widget_weapon_xp, (const char*)0x001ae6f8, param_3);
+	// 3. Registro e inyección de coordenadas del Widget 1 (Contorno de Barra de Vida)
+	u32* p_health_outline_widget = p_hud_context + 0x13; // Offset indexado param_1 + 0x13
+	hud_register_widget_asset(p_health_outline_widget, RECURSO_HEALTH_OUTLINE, p_hud_pool, p4, p5, p6, p7, p8);
+	hud_set_state_from_lookup((int)p_health_outline_widget, state_lookup_id, 2);
+	math_set_vector4(10.0f, 10.0f, 0.0f, 0.0f, p_health_outline_widget);
 
-	// Línea 212: Limpieza de bloques de memoria de armas
-	ee_memset((u8*)p_hudState + 0x39, 0, 0x18);
+	// 4. Registro e inyección de coordenadas del Widget 2 (Relleno de Barra de Vida)
+	u32* p_health_fill_widget = p_hud_context + 0x26; // Offset indexado param_1 + 0x26
+	hud_register_widget_asset(p_health_fill_widget, RECURSO_HEALTH_FILL, p_hud_pool, p4, p5, p6, p7, p8);
+	// (La inyección de coordenadas y el set_state continúan en el siguiente frame/bloque de código)
+	math_set_vector4(10.0f, 18.5f, 0.0f, 0.0f, p_health_fill_widget); // 0x41940000 = 18.5f
 
-	// --- NUEVO BLOQUE IDENTIFICADO (Líneas 210-213) ---
-	// Configura propiedades matemáticas y busca el estado del componente de texto
-	u32* widget_ammo_text = p_hudState + 0x40; // piVar14 corresponde al offset +0x40
-	math_set_vector4(0x41200000, 0x41200000, 0, 0, widget_ammo_text);
-	hud_set_state_from_lookup((u8*)widget_ammo_text, (u8*)iVar17, 1);
+	// (Esta sección continúa de forma directa el flujo dentro de hud_initialize_main_widgets)
+	hud_set_state_from_lookup((int)p_health_fill_widget, state_lookup_id, 5);
 
-	// Línea 213: Enlaza el recurso de texto "AmmoText" al componente visual del HUD
-	hud_link_widget_text(widget_ammo_text, (const char*)0x001ae700, 1);
+	// 5. Configuración e inicialización del Widget del Nombre del Arma / AmmoText
+	u32* p_wpn_name_widget = p_hud_context + 0x40; // piVar14
+	ee_memset((p_hud_context + 0x39), 0, 0x18);
+	hud_link_widget_text(p_wpn_name_widget, RECURSO_WEAPON_NAME, p_hud_pool, p4, p5, p6, p7, p8);
+	math_set_vector4_ptr(0x3f666666, 0, 0, 0, p_wpn_name_widget);
+	hud_set_widget_render_mode_alt(p_wpn_name_widget, (u32)(p_hud_context + 0x39));
+	math_set_vector4(64.0f, 150.0f, 0.0f, 0.0f, p_wpn_name_widget); // 0x42800000 = 64.0f
+	hud_set_widget_color(p_wpn_name_widget, 0);
 
-	// --- SECCIÓN 2: HUD CONTADOR DE GUITONES (BOLTS) ---
-	// Línea 226: Contenedor trasero de guitones ("BackBolt" - 0x001ae720)
-	u32* widget_back_bolt = p_hudState + 0x65;
-	hud_register_widget_asset(widget_back_bolt, (const char*)0x001ae720, param_3);
+	// 6. Registro del Medidor de Barra de Experiencia del Arma (WeaXP)
+	u32* p_wpn_xp_widget = p_hud_context + 0x56; // piStack_144
+	hud_init_meter_widget(p_wpn_xp_widget, RECURSO_WEAPON_XP, p_hud_pool, p4, p5, p6, p7, p8);
+	math_set_vector4_ptr(0x42000000, 0x42000000, 0, 0, p_wpn_xp_widget);
+	math_set_vector4(20.0f, 150.0f, 0.0f, 0.0f, p_wpn_xp_widget); // 0x41a00000 = 20.0f
+	u32* p_xp_data = (u32*)hud_get_widget_data_ptr(p_wpn_xp_widget);
+	*p_xp_data = 0x60f0f0b0; // Inicialización cromática del color de la experiencia
 
-	// Línea 230: Borde exterior del marcador de guitones ("OutlineBolt" - 0x001ae730)
-	u32* widget_outline_bolt = p_hudState + 0x78;
-	hud_register_widget_asset(widget_outline_bolt, (const char*)0x001ae730, param_3);
+	// 7. Registro de los Widgets de Iconografía de Balas
+	u32* p_ammo_icon = p_hud_context + 0x65; // piStack_140
+	hud_register_widget_asset(p_ammo_icon, RECURSO_AMMO_ICON, p_hud_pool, p4, p5, p6, p7, p8);
+	math_set_vector4(498.0f, 10.0f, 0.0f, 0.0f, p_ammo_icon); // 0x43f90000 = 498.0f
+	hud_set_state_from_lookup((int)p_ammo_icon, state_lookup_id, 3);
 
-	// Línea 236: Texto numérico para la cantidad total ("BoltText" - 0x001ae740)
-	u32* widget_bolt_text = p_hudState + 0x92;
-	hud_register_widget_asset(widget_bolt_text, (const char*)0x001ae740, param_3);
+	u32* p_ammo_icon_back = p_hud_context + 0x78; // piStack_13c
+	hud_register_widget_asset(p_ammo_icon_back, RECURSO_AMMO_ICON_BACK, p_hud_pool, p4, p5, p6, p7, p8);
+	math_set_vector4(498.0f, 10.0f, 0.0f, 0.0f, p_ammo_icon_back);
+	hud_set_state_from_lookup((int)p_ammo_icon_back, state_lookup_id, 4);
 
-	// Línea 235: Limpieza de bloques de memoria de economía
-	ee_memset((u8*)p_hudState + 0x8b, 0, 0x18);
+	// 8. Registro del Medidor de Billetera de Guitones (BoltText y BoltIcon)
+	u32* p_bolt_text_widget = p_hud_context + 0x92; // piVar16
+	ee_memset((p_hud_context + 0x8b), 0, 0x18);
+	hud_link_widget_text(p_bolt_text_widget, RECURSO_BOLT_TEXT, p_hud_pool, p4, p5, p6, p7, p8);
+	math_set_vector4_ptr(0x3f666666, 0, 0, 0, p_bolt_text_widget);
+	hud_set_widget_render_mode_alt(p_bolt_text_widget, (u32)(p_hud_context + 0x8b));
+	math_set_vector4(440.0f, 150.0f, 0.0f, 0.0f, p_bolt_text_widget); // 0x43dc0000 = 440.0f
+	hud_set_widget_color(p_bolt_text_widget, 2);
+
+	u32* p_bolt_icon_widget = p_hud_context + 0xA8; // piStack_138
+	hud_init_meter_widget(p_bolt_icon_widget, RECURSO_BOLT_ICON, p_hud_pool, p4, p5, p6, p7, p8);
+	math_set_vector4_ptr(0x42000000, 0x42000000, 0, 0, p_bolt_icon_widget);
+	math_set_vector4(457.0f, 150.0f, 0.0f, 0.0f, p_bolt_icon_widget); // 0x43e48000 = 457.0f
+	hud_set_widget_position_2d(p_bolt_icon_widget, 103, 117); // 0x7567 regional plano
+
+	// 9. Registro del Menú Radial de Selección Rápida (Quick Select Base & Anillo)
+	u32* p_qsel_back = p_hud_context + 0xb8; // piVar2
+	hud_register_widget_asset(p_qsel_back, RECURSO_QSEL_BACK, p_hud_pool, p4, p5, p6, p7, p8);
+	hud_set_state_from_lookup((int)p_qsel_back, state_lookup_id, 7);
+	math_set_vector4_ptr(1.0f, 1.0f, 0, 0, p_qsel_back);
+	math_set_vector4(500.0f, 208.0f, 0, 0, p_qsel_back); // 0x42fa0000 = 500.0f, 0x43500000 = 208.0f
+	u32* p_qsel_back_data = (u32*)hud_get_widget_data_ptr(p_qsel_back);
+	*p_qsel_back_data = 0x442d00;
+	hud_update_widget_context(p_qsel_back, (u32*)p_hud_context[0x201]);
+
+	u32* p_qsel_bord = p_hud_context + 0xcb; // piVar12
+	hud_register_widget_asset(p_qsel_bord, RECURSO_QSEL_BORD, p_hud_pool, p4, p5, p6, p7, p8);
+	hud_set_state_from_lookup((int)p_qsel_bord, state_lookup_id, 6);
+	math_set_vector4_ptr(1.0f, 1.0f, 0, 0, p_qsel_bord);
+	math_set_vector4(500.0f, 208.0f, 0, 0, p_qsel_bord);
+	u32* p_qsel_bord_data = (u32*)hud_get_widget_data_ptr(p_qsel_bord);
+	*p_qsel_bord_data = 0xf0c070;
+	hud_update_widget_context(p_qsel_bord, (u32*)p_hud_context[0x201]);
+
+	// 10. BUCLE DE GENERACIÓN Y REGISTRO EN RÁFAGA DE LAS RANURAS RADIALES (QSelBI0 - QSelBI27)
+	char name_construction_buffer[16];
+	u32 loop_iterator = 0;
+
+	do {
+		// Tu función vsnprintf interna construyendo secuencialmente los identificadores
+		// Simulamos la llamada pasando la lista de argumentos para dar formato a "QSelBI%d"
+		// txt_vsnprintf_internal(name_construction_buffer, FORMATO_SLOT_RADIAL, loop_iterator);
+
+		u32* p_dynamic_slot_widget = p_hud_context + (loop_iterator * 0x13) + 0xde; // piVar2 dinámico
+		hud_register_widget_asset(p_dynamic_slot_widget, name_construction_buffer, p_hud_pool, p4, p5, p6, p7, p8);
+
+		loop_iterator++;
+	} while (loop_iterator <= 0x1B); // Recorre las 28 ranuras programadas del arsenal
+
+	// (Esta sección continúa de forma directa la lógica interna de hud_initialize_main_widgets)
+	hud_set_state_from_lookup((int)p_dynamic_slot_widget, state_lookup_id, loop_iterator + 8);
+	math_set_vector4_ptr(1.0f, 1.0f, 0, 0, p_dynamic_slot_widget);
+	math_set_vector4(500.0f, 208.0f, 0, 0, p_dynamic_slot_widget);
+	hud_update_widget_context(p_dynamic_slot_widget, (u32*)p_hud_context[0x201]);
+	u32* p_dynamic_slot_data = (u32*)hud_get_widget_data_ptr(p_dynamic_slot_widget);
+	*p_dynamic_slot_data = 0x442d00;
+
+	// Construcción dinámica de la string del icono "QSelIco%d"
+	// txt_vsnprintf_internal(name_construction_buffer, FORMATO_ICONO_RADIAL, loop_iterator);
+
+	u32* p_dynamic_icon_widget = p_hud_context + (loop_iterator * 0x0F) + 0x189; // piVar2 de icono
+	hud_init_meter_widget(p_dynamic_icon_widget, name_construction_buffer, p_hud_pool, p4, p5, p6, p7, p8);
+	hud_set_widget_visibility(p_dynamic_icon_widget, 0);
+
+	// CÁLCULO GEOMÉTRICO DE PROYECIÓN RADIAL EN LA VU0 POR HARDWARE
+	f32 base_angle = ((f32)loop_iterator + (f32)loop_iterator) * 0.3926991f - 3.1415927f;
+	f32 normal_angle = math_normalize_angle_rad(base_angle, 1.5707964f);
+
+	f32 sin_val = math_vu0_sin_cos(normal_angle);
+	f32 cos_val = math_vu0_cos(normal_angle);
+
+	// Proyecta las coordenadas elípticas horizontales (X) y verticales (Y) en la pantalla
+	f32 projected_x = (f32)((s32)(sin_val * 82.14f) + 109); // 0x6d = 109
+	f32 projected_y = (f32)((s32)(cos_val * 76.442f) + 189); // 0xbd = 189
+	math_set_vector4(projected_x, projected_y, 0, 0, p_dynamic_icon_widget);
+
+	math_set_vector4_ptr(0x42000000, 0x42000000, 0, 0, p_dynamic_icon_widget);
+	u32* p_dynamic_icon_data = (u32*)hud_get_widget_data_ptr(p_dynamic_icon_widget);
+	*p_dynamic_icon_data = 0xf0f0b0;
+
+	loop_iterator++;
+} while (loop_iterator < 8);
+
+// 11. Bucle en ráfaga de sincronización y acoplamiento de vectores del HUD (Free List)
+u32* p_sync_vector_src = p_hud_context + 0xde; // piStack_12c
+u32* p_sync_target_a = p_hud_context + 0xf1;   // piVar2
+u32* p_sync_target_b = p_hud_context + 0x198;  // piVar12
+s32 sync_iterator = 6;
+
+do {
+	sync_iterator--;
+	u32* p_shared_vec_a = (u32*)hud_get_widget_vector_ptr(p_sync_vector_src);
+	hud_update_widget_vector(p_sync_target_a, p_shared_vec_a);
+	p_sync_target_a += 0x13;
+
+	u32* p_shared_vec_b = (u32*)hud_get_widget_vector_ptr(p_hud_context + 0x134); // piStack_134
+	hud_update_widget_vector(p_sync_target_b, p_shared_vec_b);
+	p_sync_target_b += 0x0F;
+} while (sync_iterator >= 0);
+
+// Sincroniza el candado vectorial final en el anclaje perimetral
+u32* p_final_shared_vec = (u32*)hud_get_widget_vector_ptr(p_sync_vector_src);
+hud_update_widget_vector((u32*)(p_hud_context + 0xb8), p_final_shared_vec); // piStack_d4
+
+// 12. Inicialización del layout maestro de la munición y ráfaga de sub-inventarios secundios
+u32* p_ammo_layout_container = p_hud_context + 0x202; // piStack_e8
+hud_init_ammo_layout(p_ammo_layout_container, (long)state_offset, p_hud_pool, p4, p5, p6, p7, p8);
+hud_set_ammo_widget_context_2d(0x43130000, 0x41200000, p_ammo_layout_container);
+p_ammo_layout_container[3] = 0;
+
+// Inicialización del Inventario de Soporte Secundario (Capa de Dispositivos / Gadgets)
+u32* p_sub_inv_gadgets = p_hud_context + 0x40; // piVar14
+inv_reset_weapon_inventory(p_sub_inv_gadgets);
+inv_set_weapon_inventory_mode(p_sub_inv_gadgets, 3);
+inv_set_weapon_slot_data(0, 0x442d00, 0, 0, 0, p_sub_inv_gadgets, 0);
+inv_set_weapon_slot_data(0x3E99999A, 0x60442d00, 0, 0, 0, p_sub_inv_gadgets, 1);
+inv_set_weapon_slot_data(0x3F800000, 0x60442d00, 0, 0, 0, p_sub_inv_gadgets, 2);
+inv_update_weapon_visual_pointers(0, 0x40000000, p_sub_inv_gadgets, 1);
+
+u32 context_data_res = (u32)hud_get_widget_data_ptr(p_sync_vector_src);
+inv_set_weapon_inventory_transition_flag(p_sub_inv_gadgets, context_data_res);
+inv_set_quick_select_open_state(p_sub_inv_gadgets, 0);
+inv_set_active_weapon_slot(p_sub_inv_gadgets, (p_hud_context + 0x11c));
+inv_set_weapon_inventory_visibility(p_sub_inv_gadgets, -1);
+
+// Ajusta la aceleración dinámica de interpolación según las banderas globales del sistema
+f32 anim_speed = (DAT_001a7c18 != 0) ? 0.035f : 0.029f; // Valores estimados de interpolación fina
+inv_set_animation_factor(anim_speed, p_sub_inv_gadgets);
+inv_swap_animation_lock(p_sub_inv_gadgets, 0);
+
+// (Esta sección continúa de forma directa la lógica interna de hud_initialize_main_widgets)
+f32 alt_anim_speed = (DAT_001a7c18 != 0) ? 0.035f : 0.029f;
+inv_set_animation_factor(alt_anim_speed, (u32*)piStack_f0);
+inv_swap_animation_lock((u32*)piStack_f0, 0);
+
+// Inicialización del Inventario de Soporte Secundario (Capa C)
+u32* p_sub_inv_c = (u32*)piStack_e0;
+inv_reset_weapon_inventory(p_sub_inv_c);
+inv_set_weapon_inventory_mode(p_sub_inv_c, 3);
+inv_set_weapon_slot_data(0, 0x3f99999a, 0x3f99999a, 0, 0, p_sub_inv_c, 0); // 0x3f99999a = 1.2f
+inv_set_weapon_slot_data(0x3F666666, 0x3f800000, 0x3f800000, 0, 0, p_sub_inv_c, 1);
+inv_set_weapon_slot_data(0x3F800000, 0x3f800000, 0x3f800000, 0, 0, p_sub_inv_c, 2);
+u32* p_vec_c0 = (u32*)hud_get_widget_vector_ptr((u32*)piStack_c0);
+inv_set_weapon_inventory_transition_flag(p_sub_inv_c, (u32)p_vec_c0);
+inv_set_quick_select_open_state(p_sub_inv_c, 0);
+inv_set_active_weapon_slot(p_sub_inv_c, (u32)piStack_120);
+inv_set_weapon_inventory_visibility(p_sub_inv_c, -1);
+inv_set_animation_factor(alt_anim_speed, p_sub_inv_c);
+inv_swap_animation_lock(p_sub_inv_c, 0);
+
+// Inicialización del Inventario de Soporte Secundario (Capa D - Dispositivos Especiales)
+u32* p_sub_inv_d = (u32*)piStack_128;
+inv_reset_weapon_inventory(p_sub_inv_d);
+inv_set_weapon_inventory_mode(p_sub_inv_d, 3);
+inv_set_weapon_slot_data(0, 0, 0, 0, 0, p_sub_inv_d, 0);
+inv_set_weapon_slot_data(0x3C23D70A, 0x3f800000, 0x3f800000, 0, 0, p_sub_inv_d, 1); // 0x3c23d70a = 0.01f
+inv_set_weapon_slot_data(0x3F800000, 0x3f800000, 0x3f800000, 0, 0, p_sub_inv_d, 2);
+inv_set_weapon_inventory_transition_flag(p_sub_inv_d, param_1[0x201]);
+inv_set_quick_select_open_state(p_sub_inv_d, 0);
+inv_set_active_weapon_slot(p_sub_inv_d, (u32)piStack_120);
+inv_set_weapon_inventory_visibility(p_sub_inv_d, -1);
+inv_set_animation_factor(alt_anim_speed, p_sub_inv_d);
+inv_swap_animation_lock(p_sub_inv_d, 0);
+
+// 13. CONFIGURACIÓN Y DESPACHO DE LA MATRIZ DE MUNICIÓN EXTENDIDA (Bloque de Control 1)
+u32* p_ammo_matrix_1 = (u32*)piStack_10c;
+inv_reset_extended_ammo_subsystem(p_ammo_matrix_1);
+u32* p_widget_data_1 = (u32*)hud_get_widget_data_ptr((u32*)param_1);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_1, 0, (u32)p_widget_data_1);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_1, 0, 0x442d00);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_1, 1, 0x60442d00);
+p_ammo_matrix_1[2] = 0;
+p_ammo_matrix_1[3] = 0x40000000; // 2.0f
+u32* p_widget_vec_1 = (u32*)hud_get_widget_vector_ptr((u32*)param_1);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_1, 1, (u32)p_widget_vec_1);
+inv_set_extended_ammo_slot_data(0, 0, 0, 0, p_ammo_matrix_1, 1, 0);
+inv_set_extended_ammo_slot_data(0x3F800000, 0x3F800000, 0, 0, p_ammo_matrix_1, 1, 1);
+u32* p_widget_pos_1 = (u32*)hud_get_widget_position_vector_ptr((u32*)param_1);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_1, 2, (u32)p_widget_pos_1);
+inv_set_extended_ammo_slot_data(0x42480000, 0x41c80000, 0, 0, p_ammo_matrix_1, 2, 0); // 50.0f y 25.0f
+inv_set_extended_ammo_slot_data(0x41200000, 0x41200000, 0, 0, p_ammo_matrix_1, 2, 1); // 10.0f y 10.0f
+
+// 14. CONFIGURACIÓN Y DESPACHO DE LA MATRIZ DE MUNICIÓN EXTENDIDA (Bloque de Control 2)
+u32* p_ammo_matrix_2 = (u32*)piStack_f8;
+inv_reset_extended_ammo_subsystem(p_ammo_matrix_2);
+u32* p_widget_data_2 = (u32*)hud_get_widget_data_ptr((u32*)piStack_cc);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_2, 0, (u32)p_widget_data_2);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_2, 0, 0xf0c070);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_2, 1, 0x55f0c070);
+p_ammo_matrix_1[3] = (u32)iVar25;
+p_ammo_matrix_1[2] = 0;
+u32* p_widget_vec_2 = (u32*)hud_get_widget_vector_ptr((u32*)piStack_cc);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_2, 1, (u32)p_widget_vec_2);
+inv_set_extended_ammo_slot_data(0x3F99999A, 0x3F99999A, 0, 0, p_ammo_matrix_2, 1, 0);
+inv_set_extended_ammo_slot_data(0x3F800000, 0x3F800000, 0, 0, p_ammo_matrix_2, 1, 1);
+u32* p_widget_pos_2 = (u32*)hud_get_widget_position_vector_ptr((u32*)piStack_cc);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_2, 2, (u32)p_widget_pos_2);
+inv_set_extended_ammo_slot_data(0, 0, 0, 0, p_ammo_matrix_2, 2, 0);
+inv_set_extended_ammo_slot_data(0x41200000, 0x41200000, 0, 0, p_ammo_matrix_2, 2, 1);
+
+// 15. CONFIGURACIÓN Y DESPACHO DE LA MATRIZ DE MUNICIÓN EXTENDIDA (Bloque de Control 3)
+u32* p_ammo_matrix_3 = (u32*)piStack_e4;
+inv_reset_extended_ammo_subsystem(p_ammo_matrix_3);
+u32* p_widget_data_3 = (u32*)hud_get_widget_data_ptr((u32*)piStack_114);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_3, 0, (u32)p_widget_data_3);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_3, 0, 0xf0f0f0);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_3, 1, 0x80f0f0f0);
+p_ammo_matrix_3[3] = (u32)iVar25;
+p_ammo_matrix_3[2] = 0;
+
+// Inicialización del Inventario Complementario de Balas (Capa E)
+u32* p_sub_inv_e = (u32*)piStack_c8;
+inv_reset_weapon_inventory(p_sub_inv_e);
+inv_set_weapon_inventory_mode(p_sub_inv_e, 3);
+inv_set_weapon_slot_data(0, 0x1eff, 0, 0, 0, p_sub_inv_e, 0);
+inv_set_weapon_slot_data(0x3F000000, 0x1eff, 0, 0, 0, p_sub_inv_e, 1);
+inv_set_weapon_slot_data(0x3F800000, 0x80001eff, 0, 0, 0, p_sub_inv_e, 2);
+u32* p_vec_e0 = (u32*)hud_get_widget_data_ptr((u32*)piStack_130);
+inv_set_weapon_inventory_transition_flag(p_sub_inv_e, (u32)p_vec_e0);
+inv_set_quick_select_open_state(p_sub_inv_e, 0);
+inv_set_active_weapon_slot(p_sub_inv_e, (u32)piStack_11c);
+inv_set_weapon_inventory_visibility(p_sub_inv_e, 1);
+inv_set_animation_factor(0.0666f, p_sub_inv_e); // 0x3d88850a \approx 0.0666f
+
+// 16. CONFIGURACIÓN Y DESPACHO DE LA MATRIZ DE MUNICIÓN EXTENDIDA (Bloque de Control 4 y 5)
+u32* p_ammo_matrix_4 = (u32*)piStack_124;
+inv_reset_extended_ammo_subsystem(p_ammo_matrix_4);
+u32* p_widget_data_4 = (u32*)hud_get_widget_data_ptr((u32*)piStack_110);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_4, 0, (u32)p_widget_data_4);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_4, 0, 0xf0f0b0);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_4, 1, 0x60f0f0b0);
+p_ammo_matrix_4[2] = 0;
+p_ammo_matrix_4[3] = (u32)iVar25;
+inv_set_ammo_capacity_multiplier(*(u32*)&0x000666f, p_ammo_matrix_4); // Mochila de capacidad multiplicadora [INDEX]
+
+u32* p_ammo_matrix_5 = (u32*)piStack_108;
+inv_reset_extended_ammo_subsystem(p_ammo_matrix_5);
+u32* p_widget_data_5 = (u32*)hud_get_widget_data_ptr((u32*)piStack_100);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_5, 0, (u32)p_widget_data_5);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_5, 0, 0x442d00);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_5, 1, 0x60442d00);
+
+// (Esta sección cierra de forma definitiva la lógica interna de hud_initialize_main_widgets)
+u32* p_ammo_matrix_5_base = (u32*)piStack_108;
+p_ammo_matrix_5_base[3] = 0x40000000;
+p_ammo_matrix_5_base[2] = 0; // iVar17 = 0
+u32* p_widget_vec_5 = (u32*)hud_get_widget_vector_ptr((u32*)piStack_100);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_5_base, 1, (u32)p_widget_vec_5);
+inv_set_extended_ammo_slot_data(0, 0, 0, 0, p_ammo_matrix_5_base, 1, 0);
+inv_set_extended_ammo_slot_data(0x3F800000, 0x3F800000, 0, 0, p_ammo_matrix_5_base, 1, 1);
+u32* p_widget_pos_5 = (u32*)hud_get_widget_position_vector_ptr((u32*)piStack_100);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_5_base, 2, (u32)p_widget_pos_2);
+inv_set_extended_ammo_slot_data(0x43E50000, 0x41C80000, 0, 0, p_ammo_matrix_5_base, 2, 0); // 458.0f y 25.0f
+inv_set_extended_ammo_slot_data(0x3F666666, 0x41200000, 0, 0, p_ammo_matrix_5_base, 2, 1);
+
+// 17. CONFIGURACIÓN Y DESPACHO DE LA MATRIZ DE MUNICIÓN EXTENDIDA (Bloque de Control 6 y 7)
+u32* p_ammo_matrix_6 = (u32*)piStack_f4;
+inv_reset_extended_ammo_subsystem(p_ammo_matrix_6);
+u32* p_widget_data_6 = (u32*)hud_get_widget_data_ptr((u32*)piStack_fc);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_6, 0, (u32)p_widget_data_6);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_6, 0, 0xf0c070);
+inv_set_ammo_matrix_group_state(p_ammo_matrix_6, 1, 0x55f0c070);
+p_ammo_matrix_6[2] = 0;
+p_ammo_matrix_6[3] = (u32)iVar25;
+u32* p_widget_vec_6 = (u32*)hud_get_widget_vector_ptr((u32*)piStack_fc);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_6, 1, (u32)p_widget_vec_6);
+inv_set_extended_ammo_slot_data(0x3F99999A, 0x3F99999A, 0, 0, p_ammo_matrix_6, 1, 0);
+inv_set_extended_ammo_slot_data(0x3F800000, 0x3F800000, 0, 0, p_ammo_matrix_6, 1, 1);
+p_hud_context[0x4AA] = 0;
+p_ammo_matrix_6[1] = (u32)iVar25;
+u32* p_widget_pos_6 = (u32*)hud_get_widget_position_vector_ptr((u32*)piStack_fc);
+inv_set_ammo_matrix_group_ptr(p_ammo_matrix_6, 2, (u32)p_widget_pos_6);
+inv_set_extended_ammo_slot_data(0x44008000, 0x40800000, 0, 0, p_ammo_matrix_6, 2, 0); // 514.0f y 4.0f
+inv_set_extended_ammo_slot_data(0x3F666666, 0x41200000, 0, 0, p_ammo_matrix_6, 2, 1);
+
+inv_reset_extended_ammo_subsystem((u32*)piStack_dc);
+u32* p_widget_data_7 = (u32*)hud_get_widget_data_ptr((u32*)piStack_ec);
+inv_set_ammo_matrix_group_ptr((u32*)piStack_dc, 0, (u32)p_widget_data_7);
+inv_set_ammo_matrix_group_state((u32*)piStack_dc, 0, 0xf0f0f0);
+inv_set_ammo_matrix_group_state((u32*)piStack_dc, 1, 0x80f0f0f0);
+((u32*)piStack_dc)[3] = (u32)iVar25;
+((u32*)piStack_dc)[2] = 0;
+
+inv_reset_extended_ammo_subsystem((u32*)piStack_c4);
+u32* p_widget_data_8 = (u32*)hud_get_widget_data_ptr((u32*)piStack_d8);
+inv_set_ammo_matrix_group_ptr((u32*)piStack_c4, 0, (u32)p_widget_data_8);
+inv_set_ammo_matrix_group_state((u32*)piStack_c4, 0, 0xf0f0b0);
+inv_set_ammo_matrix_group_state((u32*)piStack_c4, 1, 0x60f0f0b0);
+((u32*)piStack_c4)[3] = (u32)iVar25;
+((u32*)piStack_c4)[2] = 0;
+
+// 18. ASIGNACIÓN DE LAS CAPAS DE INVENTARIO ACTIVAS PRINCIPALES
+u32* p_main_inv_1 = (u32*)piStack_118;
+inv_reset_weapon_inventory(p_main_inv_1);
+inv_set_weapon_inventory_mode(p_main_inv_1, 2);
+u32* p_main_data_1 = (u32*)hud_get_widget_data_ptr((u32*)p_hud_context);
+inv_set_weapon_inventory_transition_flag(p_main_inv_1, (u32)p_main_data_1);
+inv_set_active_weapon_slot(p_main_inv_1, (u32)piStack_11c);
+inv_set_animation_factor(0.005f, p_main_inv_1);
+inv_set_weapon_slot_data(0, 0x70202080, 0, 0, 0, p_main_inv_1, 0);
+inv_set_weapon_slot_data(0x3F800000, 0x70242335, 0, 0, 0, p_main_inv_1, 1);
+inv_set_quick_select_open_state(p_main_inv_1, 2);
+inv_set_weapon_inventory_visibility(p_main_inv_1, 1);
+inv_swap_animation_lock(p_main_inv_1, 0);
+
+u32* p_main_inv_2 = (u32*)piStack_104;
+inv_reset_weapon_inventory(p_main_inv_2);
+inv_set_weapon_inventory_mode(p_main_inv_2, 2);
+u32* p_main_data_2 = (u32*)hud_get_widget_data_ptr((u32*)piStack_cc);
+inv_set_weapon_inventory_transition_flag(p_main_inv_2, (u32)p_main_data_2);
+inv_set_active_weapon_slot(p_main_inv_2, (u32)piStack_11c);
+inv_set_animation_factor(0.005f, p_main_inv_2);
+inv_set_weapon_slot_data(0, 0x606060c0, 0, 0, 0, p_main_inv_2, 0);
+inv_set_weapon_slot_data(0x3F800000, 0x60424162, 0, 0, 0, p_main_inv_2, 1);
+inv_set_quick_select_open_state(p_main_inv_2, 2);
+inv_set_weapon_inventory_visibility(p_main_inv_2, 1);
+inv_swap_animation_lock(p_main_inv_2, 0);
+
+// 19. RELLENO DE FLAGS GLOBALES DE TRANSICIÓN DEL EMOTION ENGINE
+p_hud_context[0xB7] = 0x001A7A80; // Dirección de tabla estática estricta
+p_hud_context[0x561] = 0;
+p_hud_context[0x563] = 0;
+p_hud_context[0x565] = 0;
+p_hud_context[0x566] = -1; // Fuerza la carga limpia sin valores basura
+p_hud_context[0x562] = -1;
+p_hud_context[0x564] = -1;
+
+// 20. FUERZA LA ACTUALIZACIÓN REGIONAL EN PÍXELES DEL CANVASES
+hud_update_layout_aspect_ratio(p_hud_context, 0);
+
+// 21. GUARDA EL PARÁMETRO DE GIRO DINÁMICO DEL ANILLO QUICK SELECT
+s32 remaining_slots_count = inv_get_quick_select_remaining_space();
+p_hud_context[0x56A] = remaining_slots_count;
 }
 
 /**
