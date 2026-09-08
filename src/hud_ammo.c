@@ -1,6 +1,7 @@
 // src/hud_ammo.c
 #include "types.h"
 #include <math.h> // Requerido para invocar a sinf() de forma nativa
+#include <stdint.h> // Asegúrate de tener esta cabecera al inicio del archivo para usar uintptr_t
 
 // Prototipos requeridos de tus funciones indexadoras de la matriz
 void inv_set_weapon_slot_data(u32 p_asset_ptr, u32 current_ammo, u32 max_ammo, u32 weapon_id, u32 experience_val, void* p_matrix_base, s32 slot_index);
@@ -11,6 +12,25 @@ void inv_set_extended_ammo_slot_data(u32 ammo_type, u32 current_ammo, u32 max_am
 
 // Prototipo de tu configurador posicional plano
 void hud_set_widget_position_2d(u32* p_widget, s32 x_coord, s32 y_coord);
+
+// Asegúrate de que las declaraciones superiores luzcan exactamente con tipo void:
+void inv_set_weapon_inventory_visibility(u32* p_inventory_base, long visibility_state);
+void inv_set_quick_select_open_state(u32* p_inventory_base, long state);
+void inv_set_animation_factor(u32* p_inventory_base, float factor);
+void inv_set_active_weapon_slot(u32* p_inventory_base, s32 slot);
+
+// Cambia los prototipos superiores para que tengan la firma exacta:
+void inv_set_weapon_inventory_mode(u32* p_inventory_base, u32 inventory_mode);
+void inv_reset_weapon_inventory(u32* p_inventory_base); // Ajusta la firma según la línea 529
+
+// Actualiza las declaraciones superiores para que coincidan letra por letra:
+void hud_set_widget_scale_y(u32* p_widget, s32 y_scale);
+void hud_set_widget_render_mode_alt(u32* p_widget, u32 render_flags);
+void hud_set_widget_color_alt(u32* p_widget, u32 color_hex); // Ajusta según la línea 666
+void hud_init_slider_widget(u32* p_widget, u32 value_id, u32 p_data_source, uintptr_t asset_name_ptr, uintptr_t p_hud_pool, long p6, long p7, long p8);
+
+void hud_set_widget_context_2d_ext(u32* p_widget, u32 val_z, u32 val_w);
+void hud_set_widget_context_2d(u32* p_widget, u32 val_x, u32 val_y);
 
 // Dirección física de la tabla global de estado de armas en la RAM de la PS2
 #define INVENTORY_WEAPONS_DATA_PTR     ((const u8*)0x0019B2F8)
@@ -365,7 +385,7 @@ void hud_init_ammo_layout(void* p_hud_main_struct, long param_2, long p_hud_pool
 	inv_reset_weapon_inventory(p_inv_a);
 	inv_set_weapon_inventory_mode(p_inv_a, 2);
 	inv_set_active_weapon_slot(p_inv_a, (p_base + 0x1CC));
-	inv_set_animation_factor(0.005f, p_inv_a);
+	inv_set_animation_factor(p_inv_a, 0.005f);
 	inv_set_quick_select_open_state(p_inv_a, 2);
 	inv_set_weapon_slot_data(0, 0x80f0c070, 0x42480000, 0, 0, p_inv_a, 0); // Capacidad 50.0f
 	inv_update_weapon_visual_pointers(0, 0, p_inv_a, 0);
@@ -464,10 +484,9 @@ void inv_set_quick_select_open_state(u32* p_inventory_base, u32 open_state) {
  * @param animation_val Factor flotante o de control destinado a la velocidad de la interfaz (param_1).
  * @param p_inventory_base Dirección de memoria base de la estructura global del inventario (param_2).
  */
-void inv_set_animation_factor(f32 animation_val, u32* p_inventory_base) {
+void inv_set_animation_factor(u32* p_inventory_base, f32 animation_val) {
 	if (p_inventory_base != NULL) {
 		// El offset 0x24 equivale al índice 9 en un arreglo de enteros de 32 bits (9 * 4 = 36 bytes)
-		// Nota: Ghidra invirtió el orden de los argumentos en el descompilador original (param_1 es el valor, param_2 es el puntero)
 		p_inventory_base[9] = *(u32*)&animation_val;
 	}
 }
@@ -670,17 +689,19 @@ void hud_set_widget_color_alt(u32* p_widget, u32 color_rgba) {
  * @param value_id Identificador o valor inicial asignado al deslizador (param_2).
  * @param p_data_source Puntero de control o fuente de datos del elemento (param_3).
  */
-void hud_init_slider_widget(u32* p_widget, u32 value_id, u32 p_data_source, const char* asset_name_ptr,
-	long p_hud_pool, long p6, long p7, long p8) {
+void hud_init_slider_widget(u32* p_widget, u32 value_id, u32 p_data_source, uintptr_t asset_name_ptr,
+	uintptr_t p_hud_pool, long p6, long p7, long p8) {
 
-	// 1. Invoca al constructor base para inicializar las matrices espaciales y habilitar la visibilidad
-	hud_clear_widget_matrices(p_widget, asset_name_ptr, p_hud_pool, (long)asset_name_ptr, p_hud_pool, p6, p7, p8);
+	// 1. Invoca al constructor base para inicializar las matrices espaciales
+	// Ajustamos los casteos de los parámetros para que coincidan con la llamada matemática original
+	hud_clear_widget_matrices(p_widget, (void*)asset_name_ptr, (void*)p_hud_pool,
+		(long)asset_name_ptr, p_hud_pool, p6, p7, p8);
 
-	// 2. Inyecta los parámetros de estado y enlaces de control en las propiedades contiguas
+	// 2. Inyecta los parámetros de estado y enlaces de control
 	p_widget[0x0F] = value_id;      // Offset 0x3C
-	p_widget[0x0D] = p_data_source;  // Offset 0x34
+	p_widget[0x0D] = p_data_source; // Offset 0x34
 
-	// 3. Establece los límites y banderas iniciales por defecto del motor (Rango al 100)
+	// 3. Establece los límites y banderas iniciales por defecto del motor
 	p_widget[0x11] = 0x80000000;    // Offset 0x44 (Máscara de actualización)
 	p_widget[0x10] = 100;           // Offset 0x40 (Límite máximo del 100%)
 }
@@ -1451,12 +1472,12 @@ inv_set_weapon_inventory_visibility(p_sub_inv_gadgets, -1);
 
 // Ajusta la aceleración dinámica de interpolación según las banderas globales del sistema
 f32 anim_speed = (DAT_001a7c18 != 0) ? 0.035f : 0.029f; // Valores estimados de interpolación fina
-inv_set_animation_factor(anim_speed, p_sub_inv_gadgets);
+inv_set_animation_factor(p_sub_inv_gadgets, anim_speed);
 inv_swap_animation_lock(p_sub_inv_gadgets, 0);
 
 // (Esta sección continúa de forma directa la lógica interna de hud_initialize_main_widgets)
 f32 alt_anim_speed = (DAT_001a7c18 != 0) ? 0.035f : 0.029f;
-inv_set_animation_factor(alt_anim_speed, (u32*)piStack_f0);
+inv_set_animation_factor((u32*)piStack_f0, alt_anim_speed);
 inv_swap_animation_lock((u32*)piStack_f0, 0);
 
 // Inicialización del Inventario de Soporte Secundario (Capa C)
@@ -1471,7 +1492,7 @@ inv_set_weapon_inventory_transition_flag(p_sub_inv_c, (u32)p_vec_c0);
 inv_set_quick_select_open_state(p_sub_inv_c, 0);
 inv_set_active_weapon_slot(p_sub_inv_c, (u32)piStack_120);
 inv_set_weapon_inventory_visibility(p_sub_inv_c, -1);
-inv_set_animation_factor(alt_anim_speed, p_sub_inv_c);
+inv_set_animation_factor(p_sub_inv_c, alt_anim_speed);
 inv_swap_animation_lock(p_sub_inv_c, 0);
 
 // Inicialización del Inventario de Soporte Secundario (Capa D - Dispositivos Especiales)
@@ -1485,7 +1506,7 @@ inv_set_weapon_inventory_transition_flag(p_sub_inv_d, param_1[0x201]);
 inv_set_quick_select_open_state(p_sub_inv_d, 0);
 inv_set_active_weapon_slot(p_sub_inv_d, (u32)piStack_120);
 inv_set_weapon_inventory_visibility(p_sub_inv_d, -1);
-inv_set_animation_factor(alt_anim_speed, p_sub_inv_d);
+inv_set_animation_factor(p_sub_inv_d, alt_anim_speed);
 inv_swap_animation_lock(p_sub_inv_d, 0);
 
 // 13. CONFIGURACIÓN Y DESPACHO DE LA MATRIZ DE MUNICIÓN EXTENDIDA (Bloque de Control 1)
@@ -1546,7 +1567,7 @@ inv_set_weapon_inventory_transition_flag(p_sub_inv_e, (u32)p_vec_e0);
 inv_set_quick_select_open_state(p_sub_inv_e, 0);
 inv_set_active_weapon_slot(p_sub_inv_e, (u32)piStack_11c);
 inv_set_weapon_inventory_visibility(p_sub_inv_e, 1);
-inv_set_animation_factor(0.0666f, p_sub_inv_e); // 0x3d88850a \approx 0.0666f
+inv_set_animation_factor(p_sub_inv_e, 0.0666f); // 0x3d88850a \approx 0.0666f
 
 // 16. CONFIGURACIÓN Y DESPACHO DE LA MATRIZ DE MUNICIÓN EXTENDIDA (Bloque de Control 4 y 5)
 u32* p_ammo_matrix_4 = (u32*)piStack_124;
@@ -1622,7 +1643,7 @@ inv_set_weapon_inventory_mode(p_main_inv_1, 2);
 u32* p_main_data_1 = (u32*)hud_get_widget_data_ptr((u32*)p_hud_context);
 inv_set_weapon_inventory_transition_flag(p_main_inv_1, (u32)p_main_data_1);
 inv_set_active_weapon_slot(p_main_inv_1, (u32)piStack_11c);
-inv_set_animation_factor(0.005f, p_main_inv_1);
+inv_set_animation_factor(p_main_inv_1, 0.005f);
 inv_set_weapon_slot_data(0, 0x70202080, 0, 0, 0, p_main_inv_1, 0);
 inv_set_weapon_slot_data(0x3F800000, 0x70242335, 0, 0, 0, p_main_inv_1, 1);
 inv_set_quick_select_open_state(p_main_inv_1, 2);
@@ -1635,7 +1656,7 @@ inv_set_weapon_inventory_mode(p_main_inv_2, 2);
 u32* p_main_data_2 = (u32*)hud_get_widget_data_ptr((u32*)piStack_cc);
 inv_set_weapon_inventory_transition_flag(p_main_inv_2, (u32)p_main_data_2);
 inv_set_active_weapon_slot(p_main_inv_2, (u32)piStack_11c);
-inv_set_animation_factor(0.005f, p_main_inv_2);
+inv_set_animation_factor(p_main_inv_2, 0.005f);
 inv_set_weapon_slot_data(0, 0x606060c0, 0, 0, 0, p_main_inv_2, 0);
 inv_set_weapon_slot_data(0x3F800000, 0x60424162, 0, 0, 0, p_main_inv_2, 1);
 inv_set_quick_select_open_state(p_main_inv_2, 2);
