@@ -1,6 +1,8 @@
 #ifndef GRAPHICS_H
 #define GRAPHICS_H
 
+#include <stdbool.h>
+
 // Estructura que simula el bloque de memoria de PS2, pero añade campos para PC
 typedef struct {
 	// --- Campos Originales PS2 (Valores nativos del juego) ---

@@ -3,6 +3,7 @@
 #include "system.h"
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>
 
 int g_CdvdNcmdInitialized = -1; // -1 significa NO inicializado, tal como la PS2
 int g_CdvdCurrentCommand = 0;
@@ -46,4 +47,53 @@ int sceCdStop(void) {
 	printf("[CDVD] Comando de reposo (Stop/Standby) procesado de forma nativa.\n");
 
 	return 0; // Retorno oficial del stub de Sony
+}
+
+// Puntero global al gran contenedor de datos extraído de tu ISO
+static FILE* g_GameDataFile = NULL;
+static FILE* g_CurrentWadFile = NULL;
+static char g_ActiveWadPath[256] = "";
+
+int sceCdRead(unsigned int sector_start, int sector_count, unsigned int dest_buffer, unsigned char* mode_struct) {
+	sceCdStop();
+	sceCdInit(4);
+
+	if (sector_count <= 0) return 0;
+
+	size_t bytes_to_read = (size_t)sector_count * 2048;
+	void* real_pc_destination = (void*)(uintptr_t)dest_buffer;
+
+	if (real_pc_destination == NULL) return 0;
+
+	// --- SISTEMA DE ENLAZADO LOCAL PROTEGIDO ---
+	// El motor descompilado buscará sectores. En un paso posterior mapearemos 
+	// RC2.HDR para saber a qué .wad exacto de 'orig/G/' pertenece cada sector.
+	// Por ahora, apuntamos por defecto al contenedor principal para la carga de la intro.
+	if (g_CurrentWadFile == NULL) {
+		snprintf(g_ActiveWadPath, sizeof(g_ActiveWadPath), "orig/G/audio0.wad"); // Ejemplo de ruta local en orig/
+		g_CurrentWadFile = fopen(g_ActiveWadPath, "rb");
+
+		if (g_CurrentWadFile == NULL) {
+			// Fallback al ejecutable base si el juego pide sectores del binario principal
+			snprintf(g_ActiveWadPath, sizeof(g_ActiveWadPath), "orig/SCES_516.07");
+			g_CurrentWadFile = fopen(g_ActiveWadPath, "rb");
+		}
+	}
+
+	if (g_CurrentWadFile != NULL) {
+		// Multiplicamos el sector original por 2048 bytes para posicionarnos en tu archivo protegido
+		long long byte_offset = (long long)sector_start * 2048;
+
+		fseek(g_CurrentWadFile, byte_offset, SEEK_SET);
+		size_t bytes_read = fread(real_pc_destination, 1, bytes_to_read, g_CurrentWadFile);
+
+		if (bytes_read > 0) {
+			printf("[CDVD NATIVO] Leyendo desde: %s | %zu bytes cargados desde el sector %u.\n",
+				g_ActiveWadPath, bytes_read, sector_start);
+			return 1; // Éxito de volcado en la RAM de PC
+		}
+	}
+
+	fprintf(stderr, "[ERROR CDVD] No se pudo leer el sector %u en la ruta local protegida.\n", sector_start);
+	return 0;
 }

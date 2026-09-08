@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <time.h> // Requerido para estructuras timespec en sistemas modernos
 #include <assert.h>
+#include <stdbool.h>
+#include "ps2_kernel.h"
 
 // Definiciones de los offsets estáticos de audio e interrupciones en la RAM de la PS2
 #define IO_WAIT_SEMA_ID             (*(s32*)0x0013642C)
@@ -42,6 +44,9 @@ extern u32 g_sys_sif_system_callback_table;
 s32  scePollSema(s32 sema_id);
 s32  sceSignalSema(s32 sema_id);
 s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
+
+// Asegúrate de que arriba en tus prototipos o cabeceras esté declarada exactamente así:
+bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
 
 extern s32 g_sys_mc_is_bound_flag;
 extern s32 g_sys_mc_mutex_sema_id;
@@ -153,10 +158,9 @@ s32  sceCreateSema(void);
 s32  sceWaitSema(s32 sema_id);
 s32  sceSignalSema(s32 sema_id);
 u32  sys_mc_io_sync_command_guard(long command_type, long p_out_cmd_ptr, long p_out_meta_ptr);
-bool sys_sif_rpc_init_client(void);
 s32  sys_sif_rpc_open_transaction_session(u32* p_session_handle, u32 command_id, u64 sync_flags);
 s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
-bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
+//bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
 
 extern s32 g_sys_mc_result_metadata_val;
 
@@ -314,7 +318,6 @@ u32 sys_mc_io_sync_command_guard(long command_type, long p_out_cmd_ptr, long p_o
 
 // Referencias a tus funciones maestras ya portadas
 u32  sys_sound_dispatch_iop_query_filter(void);
-s32  sceFlushCache(s32 cache_type);
 
 // Referencias a tus funciones del Kernel ya integradas de forma portable en ps2_kernel.c
 s32 sceGetThreadId(void);
@@ -383,16 +386,12 @@ void sys_boot_intro_state_machine(s32 execution_stage) {
 // Referencias a tus componentes del repositorio perfectamente entrelazados
 void sys_io_init_kernel_semaphores(void);
 s32  sys_sound_sync_command_guard(long command_type, long p2, long p3, long p4, long p5, long p6, long p7, long p8);
-bool sys_sif_rpc_init_client(void);
 s32  sys_sif_rpc_open_transaction_session(u32* p_session_handle, u32 command_id, u64 sync_flags);
-bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
+//bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
 
 // Stubs de soporte adicionales del SDK de la PS2 emulados de forma portable
 s32  scePollSema(s32 sema_id);
-void sceReferThreadStatus(void);
-void sceSignalSema(s32 sema_id);
-
-#include "types.h"
+//void sceSignalSema(s32 sema_id);
 
 // Definiciones de los offsets estáticos de audio e interrupciones en la RAM de la PS2
 #define IO_WAIT_SEMA_ID             (*(s32*)0x0013642C)
@@ -404,12 +403,10 @@ void sceSignalSema(s32 sema_id);
 // Referencias a tus componentes de bajo nivel e infraestructura del Kernel
 void sys_io_init_kernel_semaphores(void);
 s32  scePollSema(s32 sema_id);
-s32  sceReferThreadStatus(void);
 s32  sceSignalSema(s32 sema_id);
 s32  sys_sound_sync_command_guard(long command_type, long p2, long p3, long p4, long p5, long p6, long p7, long p8);
-bool sys_sif_rpc_init_client(void);
 s32  sys_sif_rpc_open_transaction_session(u32* p_session_handle, u32 command_id, u64 sync_flags);
-bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
+//bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
 
 // Referencias a tus componentes del repositorio perfectamente entrelazados
 u32  hud_allocate_linear_node_slot(s32* p_master_alloc_struct);
@@ -511,7 +508,12 @@ s32 sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64
 		return -1;
 	}
 
-	// 1. Reserva la ranura secuencial en la matriz del cliente RPC
+	// Definimos una estructura simulada para que el compilador entienda el tipo
+	typedef struct {
+		int dummy[16]; // Búfer de relleno para compatibilidad de tamaño
+	} SifRpcClientData;
+
+	// Tu código original ahora compilará perfectamente:
 	extern SifRpcClientData g_sys_sif_rpc_client_struct;
 	u32* p_node_slot = (u32*)hud_allocate_linear_node_slot((s32*)&g_sys_sif_rpc_client_struct);
 
@@ -624,7 +626,9 @@ s32 sys_sound_init_audio_stream_session(long current_cmd_param) {
 	// 2. Si el ID coincide, el hilo toma de forma segura el control de la sesión de audio
 	if (IO_WAIT_SEMA_ID == current_kernel_sema) {
 		CURRENT_AUDIO_CMD_ID = (s32)current_cmd_param;
-		sceReferThreadStatus();
+
+		// Si el juego original solo consulta de forma pasiva el estado del hilo de audio:
+		sceReferThreadStatus(1, NULL);
 
 		// Consulta al guardián del canal S (Sonido) si el bus físico está disponible
 		s32 is_sound_busy = sys_sound_sync_command_guard(1, 0, 0, 0, 0, 0, 0, 0);
@@ -727,7 +731,12 @@ s32 sys_sif_rpc_open_transaction_session(u32* p_session_handle, u32 command_id, 
 	p_session_handle[4] = 0; // Offset +16
 	p_session_handle[9] = 0; // Offset +36
 
-	// 1. Reserva de una ranura de widget limpia usando tu asignador secuencial
+	// Definimos una estructura simulada para que el compilador entienda el tipo
+	typedef struct {
+		int dummy[16]; // Búfer de relleno para compatibilidad de tamaño
+	} SifRpcClientData;
+
+	// Tu código original ahora compilará perfectamente:
 	extern SifRpcClientData g_sys_sif_rpc_client_struct;
 	u32* p_node_slot = (u32*)hud_allocate_linear_node_slot((s32*)&g_sys_sif_rpc_client_struct);
 
@@ -1119,7 +1128,7 @@ void kernel_system_sync_release(void);
 bool sys_sif_init_manager(void);
 void sys_sif_register_callback(long command_id, u32 callback_ptr, u32 callback_arg);
 u32  sys_sif_get_channel_descriptor_ptr(s32 channel_index);
-void sys_sif_submit_dma_packet_simple(u32 command_type, u32* p_packet_header, long packet_size, u32 src_addr, u32 dest_addr, long transfer_len);
+//void sys_sif_submit_dma_packet_simple(u32 command_type, u32* p_packet_header, long packet_size, u32 src_addr, u32 dest_addr, long transfer_len);
 
 // Stubs nativos adicionales del SDK de Sony
 u32  sceSifSetReg(void);
@@ -1267,9 +1276,9 @@ typedef struct {
 	u32  callback_arg;    // Offset +0x24 (DAT_0013e9a4)
 } SifRpcClientData;
 
-// Instancia global real en la sección de datos estáticos
-SifRpcClientData g_sys_sif_rpc_client_struct;
-u32 g_sys_sif_rpc_dummy_packet = 0;
+// Tu código original ahora compilará perfectamente:
+//extern SifRpcClientData g_sys_sif_rpc_client_struct;
+extern u32 g_sys_sif_rpc_dummy_packet;
 
 // Referencias a tus funciones e inicializadores ya consolidados en tu repositorio
 bool kernel_system_sync_guard(void);
@@ -1277,7 +1286,7 @@ void kernel_system_sync_release(void);
 bool sys_sif_init_manager(void);
 void sys_sif_register_callback(long command_id, void* callback_ptr, void* callback_arg);
 u32  sys_sif_get_channel_descriptor_ptr(s32 channel_index);
-void sys_sif_submit_dma_packet_simple(u32 command_type, u32* p_packet_header, long packet_size, u32 src_addr, u32 dest_addr, long transfer_len);
+//void sys_sif_submit_dma_packet_simple(u32 command_type, u32* p_packet_header, long packet_size, u32 src_addr, u32 dest_addr, long transfer_len);
 
 // Prototipos de soporte del SDK nativo de la PS2
 u32  sceSifGetReg(void);
@@ -1294,7 +1303,8 @@ void sys_sif_rpc_on_data_transfer(void* p_incoming_packet, void* p_hud_container
  * Estructura de forma exacta la información del cliente y registra los cuatro callbacks de interrupción.
  * Dirección original en Ghidra: 0x0011CF78 (PAL)
  */
-bool sys_sif_rpc_init_client(void) {
+ // 1. Cambiamos el tipo de retorno de 'bool' a 'int'
+int sys_sif_rpc_init_client(void) {
 	bool interrupt_status;
 
 	interrupt_status = kernel_system_sync_guard();
@@ -1304,7 +1314,7 @@ bool sys_sif_rpc_init_client(void) {
 		if (interrupt_status) {
 			kernel_system_sync_release();
 		}
-		return true;
+		return 1; // Cambiado true por 1
 	}
 
 	g_sys_sif_rpc_is_initialized = 1;
@@ -1315,17 +1325,18 @@ bool sys_sif_rpc_init_client(void) {
 
 	kernel_system_sync_guard();
 
-	// 3. Configuración en ráfaga contigua de la estructura física del cliente RPC (Offsets 0x00 a 0x24)
-	g_sys_sif_rpc_client_struct.is_active = 1;
-	g_sys_sif_rpc_client_struct.p_iop_buffer = 0x2013D180; // Dirección física original de la RAM de la PS2
-	g_sys_sif_rpc_client_struct.buffer_size = 0x20;       // 32 bytes
-	g_sys_sif_rpc_client_struct.p_gp_register = 0;
-	g_sys_sif_rpc_client_struct.packet_id = 0;
-	g_sys_sif_rpc_client_struct.p_channel_desc = 0x2013D980;
-	g_sys_sif_rpc_client_struct.server_id = 0x20;
-	g_sys_sif_rpc_client_struct.p_command_buff = 0x2013E180;
-	g_sys_sif_rpc_client_struct.command_size = 0x20;
-	g_sys_sif_rpc_client_struct.callback_arg = 0;
+	// 3. Configuración en ráfaga contigua de la estructura física
+	SifRpcClientData* p_sif_client = (SifRpcClientData*)&g_sys_sif_rpc_client_struct;
+	p_sif_client->is_active = 1;
+	p_sif_client->p_iop_buffer = 0x2013D180;
+	p_sif_client->buffer_size = 0x20;
+	p_sif_client->p_gp_register = 0;
+	p_sif_client->packet_id = 0;
+	p_sif_client->p_channel_desc = 0x2013D980;
+	p_sif_client->server_id = 0x20;
+	p_sif_client->p_command_buff = 0x2013E180;
+	p_sif_client->command_size = 0x20;
+	p_sif_client->callback_arg = 0;
 
 	// 4. Registro formal del circuito asíncrono completo con nombres auto-traducidos
 	sys_sif_register_callback(-0x7FFFFFF8, (void*)sys_sif_rpc_on_transaction_complete, &g_sys_sif_rpc_client_struct);
@@ -1339,28 +1350,36 @@ bool sys_sif_rpc_init_client(void) {
 	long register_check = (long)sceSifGetReg();
 
 	if (register_check == 0) {
-		*(u32*)0x0013D1CC = 1; // DAT_0013d1cc
+		// --- EVASIÓN DE CRASH EN PC ---
+		// Escribir directamente en la dirección física fija de PS2 0x0013D1CC 
+		// provocaría una Violación de Acceso (Segmentation Fault) instantánea en Windows.
+		// Reemplazamos el puntero hardcodeado por una variable global simulada.
+		static u32 pc_simulated_dat_0013d1cc = 0;
+		pc_simulated_dat_0013d1cc = 1;
 
 		// Envía el comando de inicialización remota RPC (0x80000002)
 		sys_sif_submit_dma_packet_simple(0x80000002, &g_sys_sif_rpc_dummy_packet, 0x10, 0, 0, 0);
 
-		// Espera activa interrogando el canal 0 de descriptores
+		// --- EVASIÓN DE BUCLE INFINITO EN PC ---
+		// El bucle original 'while(1)' esperaba que un canal DMA físico de la PS2 pusiera un flag.
+		// En PC, al no existir ese hardware, se quedaría congelado al 100% de CPU consumida.
+		// Forzamos la salida simulando éxito inmediato.
 		while (1) {
-			u32 channel_desc = sys_sif_get_channel_descriptor_ptr(0);
+			u32 channel_desc = 1; // Simulamos que el canal está listo (distinto de 0)
 			if (channel_desc != 0) {
 				break;
 			}
 		}
 
 #if defined(PLATFORM_PS2)
-		return (bool)sceSifSetReg();
+		return (int)sceSifSetReg();
 #else
-		return true;
+		return 1; // Retorna éxito en PC
 #endif
 	}
 
 	// Equivale macro MIPS SUB81 para extraer el byte de menor peso de forma portátil
-	return (bool)(register_check & 0xFF);
+	return (int)(register_check & 0xFF);
 }
 
 // Variables de estado del SIF simuladas para el port
@@ -1372,7 +1391,7 @@ u32  g_sys_sif_reg_status = 0;
 bool kernel_system_sync_guard(void);
 void kernel_system_sync_release(void);
 u64  sys_kernel_enable_dmac(void);
-void sys_sif_submit_dma_packet_simple(u32 command_type, u32* p_packet_header, long packet_size, u32 src_addr, u32 dest_addr, long transfer_len);
+//void sys_sif_submit_dma_packet_simple(u32 command_type, u32* p_packet_header, long packet_size, u32 src_addr, u32 dest_addr, long transfer_len);
 
 // Stubs de emulación para APIs nativas del SDK de Sony
 s32 sceAddDmacHandler(s32 channel, void* handler, s32 arg);
@@ -1404,9 +1423,8 @@ u32 sys_sif_get_channel_descriptor_ptr(s32 channel_index) {
 	return *p_descriptor_slot;
 }
 
-
 // Referencias a tus helpers ya integrados en el repositorio
-bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
+//bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
 s32  hud_validate_widget_node_state(const u32* p_widget_handle);
 void sys_kernel_wait_timer(u32 microseconds);
 
@@ -1637,7 +1655,7 @@ u32 sys_io_submit_command(u32 new_command_id, long p2, long p3, long p4, long p5
 #define IO_CHANNEL_WIDGET_HANDLE    (*(u32*)0x001375D0)
 
 // Referencias a tus helpers ya integrados en el repositorio
-bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
+//bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
 s32  hud_validate_widget_node_state(const u32* p_widget_handle);
 void sys_kernel_wait_timer(u32 microseconds);
 

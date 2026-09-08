@@ -8,6 +8,10 @@
 
 extern int g_GraphicsSifInitialized;
 extern unsigned int g_GraphicsVideoFormat;
+static unsigned char g_Ps2ScratchpadMemory[0x200] = { 0 };
+
+// Agrega esta línea en la sección de variables globales arriba del todo:
+unsigned char g_GraphicsIopCommandBuffers[0x440 * 4] = { 0 };
 
 // Definición de variables globales identificadas en el SIF gráfico
 unsigned int g_SifClientStructure[16] = { 0 }; // Mapea DAT_00140100
@@ -107,7 +111,9 @@ int Graphics_CloseCanvasTransaction(unsigned long slot_index) {
 	// 5. El paso clave: Marcamos la ranura como LIBRE (puVar1[1] = 0)
 	// En PC modificamos directamente la posición correcta en nuestro arreglo virtual
 	int local_offset = scratchpad_addr - 0x13ff00;
-	unsigned int* local_slot = (unsigned int*)&g_Ps2ScratchpadMemory[local_offset];
+
+	// Corregido: Obtenemos el puntero sumando el offset en bytes a la base del arreglo
+	unsigned int* local_slot = (unsigned int*)(g_Ps2ScratchpadMemory + local_offset);
 	local_slot[1] = 0;
 
 	// 6. Simulación de la Transacción SIF 1 (Cierre de Entorno en IOP)
@@ -153,7 +159,8 @@ int Graphics_DispatchCanvasTransaction(unsigned long slot_index, unsigned int pa
 	// Originalmente calculaba: (int)(puVar2 + -0x4ffc0) >> 4;
 	g_GraphicsCanvasActiveIndex = (int)((scratchpad_addr - 0x13ff00) / 0x10);
 
-	g_GraphicsResourcePath = (unsigned int)param_3;
+	// Corregido: Si param_3 es un puntero o dirección, aplicamos el casteo seguro de PC
+	*(uintptr_t*)&g_GraphicsResourcePath = (uintptr_t)param_3;
 	g_GraphicsCanvasParam3 = param_2;
 
 	// 5. Gestión asíncrona original (Flags de control de hilos en PS2)
@@ -342,7 +349,7 @@ void* g_GfxBufferPtrA = NULL; // Mapea DAT_0013e9c0
 void* g_GfxBufferPtrB = NULL; // Mapea DAT_0013e9c4
 
 // Simulación del bloque de memoria física 0x13ff00 de la PS2
-static unsigned char g_Ps2ScratchpadMemory[0x200] = { 0 };
+//static unsigned char g_Ps2ScratchpadMemory[0x200] = { 0 };
 
 int Graphics_InitSifInterface(void) {
 	// 1. Omitimos inicializaciones de hardware RPC/SIF de PS2 de forma segura
@@ -432,7 +439,7 @@ void Graphics_SetCustomResolution(int width, int height, float fps) {
 
 // Instanciamos el índice y los buffers globales simulados (ajusta los tamaños si Ghidra te revela más)
 int g_GraphicsTransactionIndex = 0;
-unsigned char g_GraphicsIopCommandBuffers[0x440 * 4] = { 0 };
+//unsigned char g_GraphicsIopCommandBuffers[0x440 * 4] = { 0 };
 int g_GraphicsActiveTransactions[32] = { 0 };
 
 void Graphics_ProcessIopTransaction(void* packet_ptr) {

@@ -1,7 +1,7 @@
 #ifndef SYSTEM_H
 #define SYSTEM_H
 
-#include <SDL2/SDL.h>
+#include <SDL.h> // ¡Cambiamos <SDL2/SDL.h> por <SDL.h>!
 
 // ... Mantener lo anterior ...
 

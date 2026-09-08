@@ -19,4 +19,14 @@ int sceCdInit(int mode);
  */
 int sceCdStop(void);
 
+/**
+ * @brief Lee un bloque de sectores de datos simulados desde la carpeta extraída en PC.
+ * @param sector_start Sector lógico inicial (Logical Sector Number).
+ * @param sector_count Cantidad de sectores de 2048 bytes a leer.
+ * @param dest_buffer Puntero de destino en la memoria RAM del juego.
+ * @param mode_struct Estructura con flags del modo de lectura.
+ * @return 1 para éxito en el inicio de la transferencia, 0 para fallo.
+ */
+int sceCdRead(unsigned int sector_start, int sector_count, unsigned int dest_buffer, unsigned char* mode_struct);
+
 #endif // CDVD_H

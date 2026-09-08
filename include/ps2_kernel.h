@@ -2,6 +2,16 @@
 #define PS2_KERNEL_H
 
 #include <stddef.h>
+#include <stdbool.h>
+
+// Mapeamos los tipos estándar que usa la PS2 (Ajusta si usas int o typedefs propios)
+typedef int s32;
+
+/**
+ * @brief Consulta el estado actual de un hilo de ejecución específico en el Kernel de la PS2.
+ */
+s32 sceReferThreadStatus(s32 thread_id, void* status_ptr);
+void sceFlushCache(int mode);
 
 /**
  * @brief Compara dos bloques de memoria de forma fiel a la optimización de PS2.
