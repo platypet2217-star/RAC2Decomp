@@ -1019,3 +1019,84 @@ s32 sceMcCheckMc(u32 slot_index, u32 context_val, const char* p_dir_path) {
 
 	return status_code;
 }
+
+// Definiciones de los offsets de buffers extendidos de formateo (ya mapeados en la suite)
+#define MC_FORMAT_SLOT_VAL          (*(u32*)0x00141C30)
+#define MC_FORMAT_CONTEXT_VAL       (*(u32*)0x00141C34)
+#define MC_FORMAT_MAX_ENTRIES       (*(u32*)0x00141C38)
+#define MC_FORMAT_CLUSTERS_VAL      (*(s32*)0x00141C3C)
+#define MC_FORMAT_FAT_BUFFER_PTR    (*(u32*)0x00141C40)
+#define MC_FORMAT_PATTERN_BUFFER    ((u8*)0x00141C44)
+
+// Referencias a tus helpers e infraestructura consolidados de ps2_kernel.c, text utils y la suite sif
+s32  scePollSema(s32 sema_id);
+s32  sceSignalSema(s32 sema_id);
+u32  sys_strncpy_safe(u32 dest_addr, const char* src_addr, u32 max_len);
+void sys_kernel_flush_dcache_range(u32 start_addr, long block_size);
+s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
+
+extern s32 g_sys_mc_is_bound_flag;
+extern s32 g_sys_mc_mutex_sema_id;
+extern s32 g_sys_mc_active_command_id;
+extern u32 g_sys_mc_channel_widget_handle;
+
+/**
+ * @brief Envía el comando de formateo e inicialización estructural de la Memory Card (Comando 0x0D) al bus de hardware.
+ * Aplica alineación bitwise de 64 bytes para el búfer FAT e inyecta la orden de forma síncrona prioritaria al IOP.
+ * Dirección original en Ghidra: 0x00127E48 (PAL)
+ */
+s32 sceMcFormat(u32 slot_index, u32 context_val, const char* p_dir_path, u32 max_entries, long clusters_count, u32 fat_buffer_addr) {
+	s32 status_code;
+
+	// 1. Validar que el subsistema de la Memory Card esté formalmente levantado
+	if (g_sys_mc_is_bound_flag == 0) {
+		return -100;
+	}
+
+	// 2. Protege el bus realizando un sondeo no bloqueante sobre el semáforo del canal
+	long sema_status = (long)scePollSema(g_sys_mc_mutex_sema_id);
+	s32 is_busy_err = -200;
+
+	if (sema_status > -1) {
+		// 3. Verificación de seguridad de la string (Filtro de seguridad SCE_MC_ERR_NAME)
+		if (p_dir_path == NULL || p_dir_path == '\0') {
+			sceSignalSema(g_sys_mc_mutex_sema_id);
+			return -0xD2;
+		}
+
+		// Vuelca los descriptores de formateo extendidos en la sección de datos estáticos
+		MC_FORMAT_SLOT_VAL = slot_index;
+		MC_FORMAT_CONTEXT_VAL = context_val;
+		MC_FORMAT_MAX_ENTRIES = max_entries;
+		MC_FORMAT_CLUSTERS_VAL = (s32)clusters_count;
+		MC_FORMAT_FAT_BUFFER_PTR = fat_buffer_addr;
+
+		// Ejecuta la copia segura en el búfer compartido utilizando tu utilería vectorial
+		sys_strncpy_safe(0x00141C44, p_dir_path, 0x3FF);
+
+		// Limpia metadatos contiguos de la estructura física de control de Sony
+		*(u8*)0x00142043 = 0;
+
+		// BARRERA DE COHERENCIA MULTIPLICADA (Capacidad << 6 equivale a multiplicar por 64 bytes)
+		if (clusters_count > -1) {
+			long calculated_bytes_len = (long)((s32)clusters_count << 6);
+			sys_kernel_flush_dcache_range(fat_buffer_addr, calculated_bytes_len);
+		}
+
+		// Despacha la orden mediante la ráfaga Comando 0x0D (Síncrona prioritaria = 1, tamaño 0x414)
+		is_busy_err = sys_sif_rpc_send_transaction_data(
+			&g_sys_mc_channel_widget_handle,
+			0x0D, 1, 0x141C30, 0x414, 0x143140, 4, 0, 0
+		);
+
+		// 4. Si la inyección en el bus SIF fue exitosa, firma el comando activo en la RAM
+		if (is_busy_err == 0) {
+			g_sys_mc_active_command_id = 0x0D;
+		}
+		else {
+			sceSignalSema(g_sys_mc_mutex_sema_id);
+		}
+	}
+
+	return is_busy_err;
+}
