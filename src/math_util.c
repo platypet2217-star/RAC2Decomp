@@ -1,8 +1,9 @@
 // src/math_util.c
-#include <stdio.h>
-#include <stdarg.h>  // ¡ESTA ES LA LIBRERÍA CRÍTICA! Permite usar va_list y va_start
 #include "types.h"   // Para que reconozca los tipos como u8, s32, bool
-#include <math.h> // Requerido para invocar a log() de forma nativa en sistemas modernos
+#include "math_util.h"
+#include <math.h>    // Requerido para invocar a log() de forma nativa en sistemas modernos
+#include <stdio.h>   // vsnprintf
+#include <stdlib.h>  // _Exit()
 
 /**
  * @brief Convierte un número de punto flotante de doble precisión (64 bits) a un entero de 32 bits con signo (int).
@@ -92,11 +93,6 @@ double math_log_double64(double x) {
 	return log(x);
 }
 
-// Referencias a tus módulos ya documentados
-void sys_safe_exit_stub(void);
-s32  game_sprintf(s32* p_buffer_struct, const char* p_format_str, ...);
-u64  ee_atoll_wrapper(const char* p_srcString, char** p_end_ptr, s32 base);
-
 /**
  * @brief Manejador de fallos de aserción del motor gráfico (Assertion Handler).
  * Detiene la ejecución del juego e imprime la ubicación exacta del bug detectado.
@@ -122,19 +118,6 @@ void sys_assert_fail(const char* p_assertion, const char* p_file, s32 line) {
 	_Exit(1); // Aborta la ejecución de inmediato en PC
 #endif
 }
-
-// Referencias cruzadas de la suite matemática y de sincronización
-u64  math_float_to_double(f32 param_1);
-void math_double_to_scientific_digits(double param_1);
-bool kernel_system_sync_guard(void);
-bool kernel_system_sync_release(void);
-
-// Prototipo requerido de la función interna que mapeamos previamente
-u64 math_pack_double64(u32* p_input_struct);
-
-// Prototipos requeridos de las funciones internas que completamos previamente
-void math_unpack_double64(u64* p_double_bits, u32* p_output_struct);
-s32  math_compare_double64(u32* p_unpack1, u32* p_unpack2);
 
 /**
  * @brief Renderizador y parser tipográfico final para números decimales y científicos en el HUD.
@@ -170,19 +153,6 @@ bool txt_render_scientific_string(const u8* format_ptr, va_list args_list) {
 	// Libera de forma segura las interrupciones del procesador central (Emotion Engine)
 	kernel_system_sync_release();
 
-	return true;
-}
-
-// ============================================================================
-// SUBSISTEMA DE TEXTO CIENTÍFICO (PUENTES DE INTERFAZ)
-// ============================================================================
-
-/**
- * @brief Función interna temporal (Stub). Reemplaza conceptualmente a FUN_0011c1f8.
- * Evita errores de compilación hasta que desarmemos la función final de renderizado.
- */
-bool txt_render_scientific_string(const u8* format_ptr, va_list args_list) {
-	// Por ahora solo retorna verdadero de forma pasiva en nuestro port
 	return true;
 }
 

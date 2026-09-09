@@ -2,8 +2,13 @@
 #define SYSTEM_H
 
 #include <SDL.h> // ¡Cambiamos <SDL2/SDL.h> por <SDL.h>!
+#include <stdio.h>
 
-// ... Mantener lo anterior ...
+// Macros de depuración con colores e íconos para identificar problemas rápido
+#define LOG_INFO(modulo, texto, ...)  printf("ℹ️  [" modulo "] " texto "\n", ##__VA_ARGS__)
+#define LOG_SUCCESS(modulo, texto, ...) printf("✅ [" modulo "] " texto "\n", ##__VA_ARGS__)
+#define LOG_WARN(modulo, texto, ...)    fprintf(stderr, "⚠️  [" modulo "] " texto "\n", ##__VA_ARGS__)
+#define LOG_ERROR(modulo, texto, ...)   fprintf(stderr, "❌ [" modulo "] ERRROR CRÍTICO: " texto "\n", ##__VA_ARGS__)
 
 /**
  * @brief Envía una señal de liberación al semáforo gráfico principal desde el subsistema.

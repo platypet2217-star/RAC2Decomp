@@ -1,39 +1,19 @@
 // src/kernel_sys.c
 #include "types.h"
+#include "kernel_sys.h"
+#include "math_util.h"  // sys_assert_fail, txt_format_scientific_wrapper
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <errno.h>
-
-// Referencias requeridas de tu ecosistema
-s32  game_sprintf(s32* p_buffer_struct, const char* p_format_str, ...);
-void sys_assert_fail(const char* p_assertion, const char* p_file, s32 line);
-
-// Prototipo de la función maestra que completamos previamente
-const void** ee_get_ctype_table_ptr(void);
 
 // Control de buffer estático secundario/alternativo de logs
 s32   g_log_buffer_count_alt = 0;
 char  g_log_static_buffer_alt[128]; // Tamaño basado en el límite 0x7f
 char* g_log_buffer_write_ptr_alt = g_log_static_buffer_alt;
 
-// Prototipo del despachador maestro requerido
-s32 sys_log_dispatch_message(u32 log_level, const char* p_message, s32 message_len);
-
 // Variables de buffer globales estáticas remanentes de la PS2
 char g_dtoa_output_buffer[256] = { 0 }; // DAT_0013c100
-
-// Referencias a tus helpers del Canal B e interfaz de localización
-const void** ee_ctype_interface_wrapper(void);
-u32 sys_log_write_buffered_alt(s32 log_level, const char* p_srcString, u32 write_len, s32 flush_flag);
-void* ee_memcpy(void* dest, const void* src, u32 size);
-
-// Referencias a tus dos motores ya mapeados en tu ecosistema
-s32 custom_vsprintf_engine(void* output_dest, int* p_state_struct, const char* p_format_str, va_list args_list);
-s32 custom_vsprintf_engine_alt(void* output_dest, int* p_state_struct, const char* p_format_str, va_list args_list);
-
-// Prototipo de tu despachador inteligente ya mapeado
-s32 txt_sprintf_channel_dispatcher(s32* p_buffer_struct, const char* p_format_str, va_list args_list);
 
 /**
  * @brief Función interna vsnprintf del motor. Da formato a un string con límite de tamaño.
@@ -149,7 +129,7 @@ s32 custom_vsprintf_engine_alt(void* output_dest, int* p_state_struct, const cha
 	// Inicializa el mapeo local de localización del compilador original
 	ee_ctype_interface_wrapper();
 
-	char local_buffer;
+	char local_buffer[1024];
 
 	// Delegamos de forma portátil el parseo masivo de flags ('-', '+', '#', '.')
 	// y precisión de 64 bits al hardware nativo de la CPU moderna:
@@ -203,9 +183,6 @@ const char* math_dtoa_format(double value, s32 precision, char format_char, s32 
 
 	return g_dtoa_output_buffer;
 }
-
-// Prototipo de tu inversor de cadenas ya mapeado
-char* ee_strrev(char* p_str);
 
 /**
  * @brief Convierte un número entero a una cadena de caracteres ASCII en cualquier base numérica (Itoa / Ltoa).
@@ -417,17 +394,6 @@ void sys_assert_dispatch(const char* p_file, s32 line, const char* p_assertion,
 	sys_assert_fail(p_assertion, p_file, line);
 }
 
-
-// Prototipo de la función de inicialización de memoria que acabas de conectar
-void kernel_hardware_memory_init(void);
-
-// Prototipos requeridos del Kernel de Sony
-long GetMemorySize(void);
-void _InitTLB(void);
-
-// Referencia a tu función de sincronización ya mapeada
-long kernel_tlb_cache_sync(void);
-
 // Dirección física del arreglo de punteros de localización en la PS2
 const u32* g_locale_ctype_array = (const u32*)0x0013A388;
 
@@ -500,13 +466,6 @@ void sys_kernel_panic_abort(s32 exit_code) {
 // SUBSISTEMA DE CONTROL Y GESTIÓN DE MEMORIA (KERNEL)
 // ============================================================================
 
-void SYNC(int type);
-void RFU086_WaitEvnetFlag(void);
-bool txt_format_scientific_wrapper(const u8* format_ptr, ...);
-
-// Declaración oficial de tu manejador de pánico
-void sys_kernel_panic_abort(s32 exit_code);
-
 /**
  * @brief Gestiona la sincronización, vaciado e invalidación de páginas de la memoria caché TLB de la PS2.
  * Dirección original en Ghidra: 0x0011F170 (PAL)
@@ -577,9 +536,6 @@ long kernel_tlb_cache_sync(void) {
 
 	return (long)((s32)iterator << 13);
 }
-
-// Prototipo requerido de la función maestra que completamos previamente
-s64 ee_strtoll(s32* p_error_out, const char* p_srcString, char** p_end_ptr, s32 base);
 
 /**
  * @brief Envoltorio simplificado para convertir texto a entero de 64 bits (Equivalente portable a atoll).
@@ -655,23 +611,10 @@ u32 g_list_sentinel_node = 0; // Representa a DAT_0013cad0
 // Bandera de control de inicialización
 s32 g_deci2_is_initialized = 0;
 
-// Prototipos requeridos
-bool sys_deci2_subsystem_init(void);
-s32 sys_deci2_print_log(const char* p_message, s32 max_len);
-
 // Control de buffer estático de logs
 s32   g_log_buffer_count = 0;
 char  g_log_static_buffer[128]; // Tamaño basado en el límite 0x7f
 char* g_log_buffer_write_ptr = g_log_static_buffer;
-
-// Prototipos e infraestructura que descubrimos en el análisis de este motor de texto
-int  ee_strlen(const char* str);
-void* ee_memcpy(void* dest, const void* src, u32 size);
-void* ee_memchr(const void* ptr, int value, u32 num);
-s32  sys_log_write_buffered(s32 log_level, const char* p_srcString, u32 write_len, s32 flush_flag);
-
-// Prototipo requerido de la interfaz intermedia
-s32 txt_sprintf_wrapper(s32* p_buffer_struct, const char* p_format_str, va_list args_list);
 
 /**
  * @brief Función principal de construcción de texto con formato (Printf / Sprintf del juego).
@@ -699,10 +642,6 @@ s32 game_sprintf(s32* p_buffer_struct, const char* p_format_str, ...) {
 
 	return total_written;
 }
-
-
-// Prototipo requerido del motor maestro
-s32 custom_vsprintf_engine(void* output_dest, int* p_state_struct, const char* p_format_str, va_list args_list);
 
 /**
  * @brief Función de interfaz para formatear cadenas de texto en un búfer estructurado.
@@ -820,10 +759,6 @@ void* ee_memcpy(void* dest, const void* src, u32 size) {
 	return dest;
 }
 
-
-// Prototipo requerido
-s32 sys_log_dispatch_message(u32 log_level, const char* p_message, s32 message_len);
-
 /**
  * @brief Escribe texto de forma segmentada dentro de un búfer de acumulación de 128 bytes.
  * Realiza un vaciado automático (autoflush) al llenarse o de forma explícita mediante flags.
@@ -876,7 +811,6 @@ u32 sys_log_write_buffered(s32 log_level, const char* p_srcString, u32 write_len
 	return bytes_processed;
 }
 
-
 /**
  * @brief Despacha y filtra los mensajes de diagnóstico del juego hacia el subsistema de logs.
  * Realiza una inicialización bajo demanda (Lazy Init) del sistema de red si no está activo.
@@ -909,7 +843,6 @@ s32 sys_log_dispatch_message(u32 log_level, const char* p_message, s32 message_l
 	return result_status;
 }
 
-
 /**
  * @brief Inicializa una lista enlazada global o cola de administración de memoria del motor.
  * Configura el nodo raíz, inicializa el contador a 0 y enlaza los punteros Head y Tail.
@@ -929,11 +862,6 @@ void* sys_queue_initialize(u32 param_1) {
 	return &g_list_root_param;
 }
 
-// Definiciones ficticias de registros del sistema para mantener la compatibilidad del código
-extern u32 Status;
-void DI(void);
-void SYNC(int type);
-
 // Variables de control de red del sistema
 s32 g_deci2_channel_status = -1;
 u32 g_deci2_var1 = 0;
@@ -950,23 +878,10 @@ u8  g_net_packet_id2 = 0;
 u8  g_net_packet_flags = 0;
 u16 g_net_packet_type = 0;
 
-// Declaraciones de funciones requeridas
-void FlushCache(void);
-s32 sys_deci2_call_channel_a(void);
-void* sys_queue_initialize(u32 capacity);
-
-void EI(void);
-
 // Control de semáforo e impresión
 s32 g_deci2_print_mutex = 0;
 s32 g_deci2_packet_len = 0;
 char g_deci2_print_buffer[256]; // Representa el espacio físico en DAT_2013cc0c
-
-// Prototipos necesarios
-bool kernel_system_sync_guard(void);
-bool kernel_system_sync_release(void);
-void sys_deci2_call_wrapper(void);
-void sys_deci2_call_channel_c(void);
 
 /**
  * @brief Transmite un mensaje de registro formateado al sistema de depuración remota.
@@ -1026,7 +941,6 @@ s32 sys_deci2_print_log(const char* p_message, s32 max_len) {
 	return status_code;
 }
 
-
 /**
  * @brief Rutina de liberación y activación de interrupciones del procesador Emotion Engine.
  * Reactiva los hilos del sistema de la PS2 tras una operación crítica de sincronización.
@@ -1052,7 +966,7 @@ bool kernel_system_sync_release(void) {
 bool sys_deci2_subsystem_init(void) {
 	// 1. Limpieza de las cachés del procesador central
 #ifdef PLATFORM_PS2
-	FlushCache();
+	FlushCache(0); // WRITEBACK_DCACHE
 #endif
 
 	// 2. Intenta abrir y verificar el estado del canal de depuración
@@ -1084,7 +998,6 @@ bool sys_deci2_subsystem_init(void) {
 
 	return is_channel_valid;
 }
-
 
 /**
  * @brief Rutina de bloqueo y sincronización del procesador Emotion Engine.
@@ -1212,9 +1125,9 @@ void sys_deci2_call_wrapper(void) {
  * @brief Segundo envoltorio de paso para el canal de depuración DECI2 de Sony.
  * Dirección original en Ghidra: 0x0011B978 (PAL)
  */
-void sys_deci2_call_channel_a(void) {
-	// Retorno directo pasivo (Stub) para compatibilidad en el port nativo.
-	return;
+s32 sys_deci2_call_channel_a(void) {
+	// Retorno pasivo (Stub) para compatibilidad en el port nativo: 0 = canal disponible/sin error.
+	return 0;
 }
 
 /**
@@ -1225,4 +1138,3 @@ void sys_deci2_call_channel_c(void) {
 	// Retorno directo pasivo (Stub) para compatibilidad estructural en el port nativo.
 	return;
 }
-

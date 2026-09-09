@@ -52,6 +52,7 @@ long long Sys_WaitGraphicsFrame(void) {
 	return 0;
 }
 
+/*
 // Inicializamos las variables en el estado original de la PS2 (-1)
 int g_GraphicsSemaphoreID = SYS_SEMAPHORE_INVALID;
 SDL_sem* g_GraphicsSemaphore = NULL;
@@ -62,12 +63,13 @@ void Sys_InitGraphicsSemaphore(void) {
 		g_GraphicsSemaphore = SDL_CreateSemaphore(0);
 
 		if (g_GraphicsSemaphore != NULL) {
-			// Asignamos un ID ficticio diferente de -1 para que la lógica del juego 
+			// Asignamos un ID ficticio diferente de -1 para que la lógica del juego
 			// sepa que la inicialización fue exitosa y proceda correctamente.
 			g_GraphicsSemaphoreID = 1;
 		}
 	}
 }
+*/
 
 // Inicializamos el primer par de variables en -1
 int g_RenderSemaphoreID_A = SYS_SEMAPHORE_INVALID;

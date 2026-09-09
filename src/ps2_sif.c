@@ -1,4 +1,6 @@
 #include "types.h"
+#include "ps2_kernel.h"
+#include "ps2_sif.h"
 
 // Variables de estado global de las tablas del bus SIF mapeadas en la RAM de la PS2
 #define SIF_GENERAL_CALLBACK_TABLE     (*(u32*)0x0013CFEC)
@@ -7,9 +9,6 @@
 // Definición de las variables globales de interrupción mapeadas en la RAM de la PS2
 #define IO_INTERRUPT_CALLBACK       (*(void(**)(u32))(long)0x001418C4)
 #define IO_INTERRUPT_ARGUMENT       (*(u32*)0x001418C8)
-
-// Variable global externa definida en tu misma suite
-extern s32 g_sys_io_reconfig_flag;
 
 /**
  * @brief Manejador de interrupción (Callback) de bajo nivel del bus SIF IO.
@@ -33,16 +32,6 @@ void sys_io_iop_interrupt_handler(void) {
 u8   g_sys_sif_is_initialized = 0;
 u32  g_sys_sif_handler_id = 0;
 u32  g_sys_sif_reg_status = 0;
-
-// Referencias a tus funciones del Kernel de ps2_kernel.c
-bool kernel_system_sync_guard(void);
-void kernel_system_sync_release(void);
-u64  sys_kernel_enable_dmac(void);
-
-// Prototipos oficiales emulados del SDK de Sony
-u64  sceSifSetDma(void);
-u64  isceSifSetDma(void);
-s32  sceAddDmacHandler(s32 channel, void* handler, s32 arg);
 
 /**
  * @brief Empaqueta y despacha una transacción de transferencia asíncrona de datos a través del bus de hardware SIF (DMA).
@@ -176,20 +165,6 @@ void sys_sif_unregister_callback(long command_id) {
 #define IO_INTERRUPT_ACTIVE_FLAG    (*(s32*)0x00136414)
 #define IO_THREAD_RESET_DESCRIPTOR  (*(s32*)0x00136454)
 
-// Referencias a tus stubs del Kernel de ps2_kernel.c
-s32  sceSignalSema(s32 sema_id);
-s32  sceDeleteSema(s32 sema_id);
-bool kernel_system_sync_guard(void);
-void kernel_system_sync_release(void);
-
-// Referencias a las tablas e inicializadores de interrupciones
-void sys_sif_unregister_callback(long command_id);
-
-// Referencias a las variables globales de semáforos externos
-extern s32 g_sys_io_lock_sema_id;
-extern s32 g_sys_io_wait_sema_id;
-extern s32 g_sys_io_dma_sema_id;
-
 /**
  * @brief Apaga, desmantela y libera por completo los recursos y semáforos del subsistema de Entrada/Salida (IO).
  * Remueve el callback -0x7fffffee del bus SIF y destruye los tres semáforos de sincronización física.
@@ -230,14 +205,6 @@ bool sys_io_shutdown_subsystem(void) {
 // Definición de las variables globales IO mapeadas en la RAM de la PS2
 #define IO_RECONFIG_FLAG            (*(s32*)0x00136424)
 #define IO_IS_READY_FLAG            (*(s32*)0x0013643C)
-
-// Prototipos internos de tu ecosistema SIF y Kernel
-bool kernel_system_sync_guard(void);
-void kernel_system_sync_release(void);
-void sys_sif_register_callback(long command_id, void* callback_ptr, void* callback_arg);
-
-// Prototipo del manejador físico que desarmaremos en breve
-void sys_io_iop_interrupt_handler(void);
 
 /**
  * @brief Inicializa y configura el canal de servicios de Entrada/Salida (IO) asíncronos en el Kernel.
@@ -281,24 +248,6 @@ s32 g_sys_cdvd_thread_owner_id = 0;
 s32 g_sys_cdvd_init_attempts_count = 0;
 u32 g_sys_cdvd_channel_widget_handle = 0;
 s32 g_sys_cdvd_is_bound_flag = 0;
-
-// Referencias a tus componentes externos del Kernel, SIF e IO ya integrados
-s32  sceGetThreadId(void);
-void sys_kernel_flush_dcache_range(u32 start_addr, long block_size);
-s32  sys_sound_sync_command_guard(long command_type, long p2, long p3, long p4, long p5, long p6, long p7, long p8);
-bool sys_sif_rpc_init_client(void);
-s32  sys_sif_rpc_open_transaction_session(u32* p_session_handle, u32 command_id, u64 sync_flags);
-s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
-bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
-void sys_io_init_kernel_semaphores(void);
-s32  sys_io_init_subsystem(void);
-bool sys_io_shutdown_subsystem(void);
-
-extern s32 g_sys_io_reconfig_flag;
-extern s32 g_sys_io_is_ready_flag;
-extern s32 g_sys_io_lock_sema_id;
-extern s32 g_sys_io_wait_sema_id;
-extern s32 g_sys_io_dma_sema_id;
 
 /**
  * @brief Inicializa y monta el sistema de archivos de la lectora de DVD (libcdvd) a través de transacciones SIF RPC.
@@ -396,24 +345,10 @@ u32 sys_cdvd_init_filesystem(s32 init_mode) {
 // Definición de registros y buffers estáticos del chequeo de disco mapeados en la RAM de la PS2
 #define CDVD_READY_MODE_BUFFER_VAL  (*(u32*)0x00141B50)
 #define CDVD_READY_STATUS_BACKUP    (*(s32*)0x00136444)
-#define DEBUG_NET_LOG_LEVEL         (*(s32*)0x00136410)
 
 // Variables globales del canal secundario de libcdvd mapeadas desde Ghidra
 u32 g_sys_cdvd_ready_channel_handle = 0;
 s32 g_sys_cdvd_ready_is_bound_flag = 0;
-
-// Referencias a tus componentes externos del Kernel, SIF e IO ya integrados
-s32  scePollSema(s32 sema_id);
-s32  sceSignalSema(s32 sema_id);
-void sys_kernel_flush_dcache_range(u32 start_addr, long block_size);
-void sys_io_init_kernel_semaphores(void);
-s32  sys_sound_sync_command_guard(long command_type, long p2, long p3, long p4, long p5, long p6, long p7, long p8);
-bool sys_sif_rpc_init_client(void);
-s32  sys_sif_rpc_open_transaction_session(u32* p_session_handle, u32 command_id, u64 sync_flags);
-s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
-bool boot_txt_render_extended_string(const u8* p_src_str, long param_2, long param_3, long param_4, long param_5, long param_6, long param_7, long param_8);
-
-extern s32 g_sys_io_wait_sema_id;
 
 /**
  * @brief Interroga el estado de preparación y presencia física del disco en la lectora (sceCdDiskReady wrapper).
@@ -509,17 +444,6 @@ u32 sys_cdvd_check_disk_ready(long check_mode) {
 #define MC_READ_LEN_VAL             (*(u32*)0x00141BAC)
 #define MC_READ_OFFSET_VAL          (*(u32*)0x00141BB0)
 
-// Referencias a tus helpers e infraestructura consolidados en ps2_kernel.c y la suite sif
-s32  scePollSema(s32 sema_id);
-s32  sceSignalSema(s32 sema_id);
-void sys_kernel_flush_dcache_range(u32 start_addr, long block_size);
-s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
-
-extern s32 g_sys_mc_is_bound_flag;
-extern s32 g_sys_mc_mutex_sema_id;
-extern s32 g_sys_mc_active_command_id;
-extern u32 g_sys_mc_channel_widget_handle;
-
 /**
  * @brief Envía el comando de lectura en bloque de un archivo de la Memory Card (Comando 1) al bus de hardware.
  * Configura los buffers de destino, offsets y tamaños aplicando flushes dcache e interrupciones síncronas.
@@ -583,17 +507,6 @@ s32 sceMcRead(u32 file_descriptor, u32 read_size, long p_dest_buffer, long block
 #define MC_WRITE_SRC_PTR            (*(u32*)0x00141C18)
 #define MC_WRITE_SIZE_VAL           (*(u32*)0x00141C0C)
 
-// Referencias a tus helpers e infraestructura consolidados de ps2_kernel.c y la suite sif
-s32  scePollSema(s32 sema_id);
-s32  sceSignalSema(s32 sema_id);
-void sys_kernel_flush_dcache_range(u32 start_addr, long block_size);
-s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
-
-extern s32 g_sys_mc_is_bound_flag;
-extern s32 g_sys_mc_mutex_sema_id;
-extern s32 g_sys_mc_active_command_id;
-extern u32 g_sys_mc_channel_widget_handle;
-
 /**
  * @brief Envía el comando de escritura en bloque de un archivo hacia la Memory Card (Comando 5) al bus de hardware.
  * Configura las direcciones de origen de la RAM, longitudes de ráfaga y aplica flushes dobles de dcache de seguridad.
@@ -651,153 +564,6 @@ s32 sceMcWrite(u32 file_descriptor, u32 src_ram_addr, long write_size) {
 #define MC_EXT_ALIGNMENT_OFFSET    (*(u32*)0x00141C14)
 #define MC_EXT_ALIGNED_BUFFER_PTR  ((u8*)0x00141C20)
 
-// Referencias a tus helpers e infraestructura consolidados de ps2_kernel.c y la suite sif
-s32  scePollSema(s32 sema_id);
-s32  sceSignalSema(s32 sema_id);
-s32  sceFlushCache(s32 cache_type);
-s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
-
-extern s32 g_sys_mc_is_bound_flag;
-extern s32 g_sys_mc_mutex_sema_id;
-extern s32 g_sys_mc_active_command_id;
-extern u32 g_sys_mc_channel_widget_handle;
-extern u32 g_sys_mc_write_fd;
-extern u32 g_sys_mc_write_src_ptr;
-extern u32 g_sys_mc_write_size;
-
-/**
- * @brief Envía el comando de escritura extendido y alineado para metadatos/iconos en la Memory Card (Comando 6).
- * Realiza un empaquetado por alineación de 16 bytes en la sección de datos estáticos aplicando flushes de caché.
- * Dirección original en Ghidra: 0x001279A0 (PAL)
- */
-s32 sceMcWriteExtended(u32 file_descriptor, const u8* p_src_ram_buffer, long raw_write_size) {
-	s32 status_code;
-
-	// 1. Validar que el subsistema de la Memory Card esté formalmente levantado
-	if (g_sys_mc_is_bound_flag == 0) {
-		return -100;
-	}
-
-	// 2. Protege el bus realizando un sondeo no bloqueante sobre el semáforo de exclusión mutua
-	long sema_status = (long)scePollSema(g_sys_mc_mutex_sema_id);
-	if (sema_status < 0) {
-		return -200;
-	}
-
-	// 3. Aritmética de alineación de hardware MIPS para el bus de descriptores del DMA SIF
-	if (raw_write_size < 0x11) {
-		g_sys_mc_write_src_ptr = 0;
-		g_sys_mc_write_size = 0;
-		MC_EXT_ALIGNMENT_OFFSET = (u32)raw_write_size;
-	}
-	else {
-		MC_EXT_ALIGNMENT_OFFSET = ((u32)((uintptr_t)p_src_ram_buffer + -1) & 0xFFFFFFF0) - (u32)((uintptr_t)p_src_ram_buffer + -0x10);
-		g_sys_mc_write_size = (u32)raw_write_size - MC_EXT_ALIGNMENT_OFFSET;
-		g_sys_mc_write_src_ptr = (u32)((uintptr_t)p_src_ram_buffer + MC_EXT_ALIGNMENT_OFFSET);
-	}
-
-	u32 cursor_idx = 0;
-	const u8* p_cursor_ptr = p_src_ram_buffer;
-	g_sys_mc_write_fd = file_descriptor;
-
-	// Copia manual byte por byte para parchar el desajuste de alineación física en la RAM
-	if (MC_EXT_ALIGNMENT_OFFSET != 0) {
-		do {
-			u32 next_idx = cursor_idx + 1;
-			MC_EXT_ALIGNED_BUFFER_PTR[cursor_idx] = *p_cursor_ptr;
-			p_cursor_ptr = p_src_ram_buffer + next_idx;
-			cursor_idx = next_idx;
-		} while (cursor_idx < MC_EXT_ALIGNMENT_OFFSET);
-	}
-
-	// Asegura la coherencia de las instrucciones en la CPU antes del disparo
-	sceFlushCache(0);
-
-	// Despacha la orden mediante la ráfaga Comando 6 (Síncrona prioritaria = 1)
-	status_code = sys_sif_rpc_send_transaction_data(
-		&g_sys_mc_channel_widget_handle,
-		6, 1, 0x141C00, 0x30, 0x143140, 4, 0, 0
-	);
-
-	// 4. Si la inyección en el bus SIF fue exitosa, firma el comando activo en la RAM
-	if (status_code == 0) {
-		g_sys_mc_active_command_id = 6;
-	}
-	else {
-		sceSignalSema(g_sys_mc_mutex_sema_id);
-	}
-
-	return status_code;
-}
-
-// Referencias a tus helpers e infraestructura consolidados de ps2_kernel.c y la suite sif
-s32  scePollSema(s32 sema_id);
-s32  sceSignalSema(s32 sema_id);
-s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
-
-extern s32 g_sys_mc_is_bound_flag;
-extern s32 g_sys_mc_mutex_sema_id;
-extern s32 g_sys_mc_active_command_id;
-extern u32 g_sys_mc_channel_widget_handle;
-extern u32 g_sys_mc_read_fd;
-extern u32 g_sys_mc_read_size; // Mapeado previamente como DAT_00141c08
-
-/**
- * @brief Cambia el directorio de trabajo activo dentro de la Memory Card (Comando 0x10).
- * Configura el slot y la ruta de destino enviando la orden de forma síncrona prioritarias al IOP.
- * Dirección original en Ghidra: 0x00127F98 (PAL)
- *
- * @param slot_index Ranura de la tarjeta a interrogar (0 = Slot 1, 1 = Slot 2) (param_1).
- * @param p_dir_path Cadena de texto con el nombre o ruta del directorio a abrir (param_2).
- * @return s32 Código de estado (0 para comando aceptado en el bus, valores negativos para error).
- */
-s32 sceMcChdir(u32 slot_index, const char* p_dir_path) {
-	s32 status_code;
-
-	// 1. Validar que el subsistema de la Memory Card esté formalmente levantado
-	if (g_sys_mc_is_bound_flag == 0) {
-		return -100;
-	}
-
-	// 2. Protege el bus realizando un sondeo no bloqueante sobre el semáforo del canal
-	long sema_status = (long)scePollSema(g_sys_mc_mutex_sema_id);
-	if (sema_status < 0) {
-		return -200;
-	}
-
-	// 3. Vuelca en ráfaga contigua los parámetros de navegación en la sección de datos estáticos
-	g_sys_mc_read_fd = slot_index;
-	g_sys_mc_read_size = (u32)(uintptr_t)p_dir_path; // Reutiliza el buffer DAT_00141c08 para el puntero de texto
-
-	// Despacha la orden mediante la ráfaga Comando 0x10 (Síncrona prioritaria = 1)
-	status_code = sys_sif_rpc_send_transaction_data(
-		&g_sys_mc_channel_widget_handle,
-		0x10, 1, 0x141C00, 0x30, 0x143140, 4, 0, 0
-	);
-
-	// 4. Si la inyección en el bus SIF fue exitosa, firma el comando activo en la RAM
-	if (status_code == 0) {
-		g_sys_mc_active_command_id = 0x10;
-	}
-	else {
-		sceSignalSema(g_sys_mc_mutex_sema_id);
-	}
-
-	return status_code;
-}
-
-// Referencias a tus helpers e infraestructura consolidados de ps2_kernel.c y la suite sif
-s32  scePollSema(s32 sema_id);
-s32  sceSignalSema(s32 sema_id);
-s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
-
-extern s32 g_sys_mc_is_bound_flag;
-extern s32 g_sys_mc_mutex_sema_id;
-extern s32 g_sys_mc_active_command_id;
-extern u32 g_sys_mc_channel_widget_handle;
-extern u32 g_sys_mc_read_fd;
-extern u32 g_sys_mc_read_size; // DAT_00141c08 compartido
-
 /**
  * @brief Crea un nuevo directorio o carpeta de trabajo activo dentro de la Memory Card (Comando 0x11).
  * Configura el slot y la ruta de la carpeta enviando la orden de forma síncrona prioritaria al IOP.
@@ -847,17 +613,6 @@ s32 sceMcMkdir(u32 slot_index, const char* p_dir_path) {
 #define MC_DELETE_CONTEXT_VAL       (*(u32*)0x00141C34)
 #define MC_DELETE_FILENAME_BUFFER   ((u8*)0x00141C44)
 
-// Referencias a tus helpers e infraestructura consolidados de ps2_kernel.c y la suite sif
-s32  scePollSema(s32 sema_id);
-s32  sceSignalSema(s32 sema_id);
-void sys_strncpy_safe(void* dest, const void* src, size_t max_len); // FUN_00115ac0 clone
-s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
-
-extern s32 g_sys_mc_is_bound_flag;
-extern s32 g_sys_mc_mutex_sema_id;
-extern s32 g_sys_mc_active_command_id;
-extern u32 g_sys_mc_channel_widget_handle;
-
 /**
  * @brief Envía el comando de borrado de un archivo en la Memory Card (Comando 0x0F) al bus de hardware.
  * Valida la integridad del nombre del archivo, ejecuta una copia segura y despacha la transacción al IOP.
@@ -888,7 +643,7 @@ s32 sceMcDelete(u32 slot_index, u32 context_val, const char* p_filename_path) {
 		}
 
 		// Ejecuta la copia segura utilizando el clon local de strncpy (límite 0x3FF bytes)
-		sys_strncpy_safe(MC_DELETE_FILENAME_BUFFER, p_filename_path, 0x3FF);
+		sys_strncpy_safe((u32)(uintptr_t)MC_DELETE_FILENAME_BUFFER, p_filename_path, 0x3FF);
 
 		// Limpia metadatos contigüos de limpieza de la estructura física del kernel de Sony
 		*(u8*)0x00142043 = 0; // DAT_00142043
@@ -921,17 +676,6 @@ s32 sceMcDelete(u32 slot_index, u32 context_val, const char* p_filename_path) {
 #define MC_GETDIR_CONTEXT_VAL       (*(u32*)0x00141C34)
 #define MC_GETDIR_MAX_ENTRIES       (*(u32*)0x00141C38)
 #define MC_GETDIR_PATTERN_BUFFER    ((u8*)0x00141C44)
-
-// Referencias a tus helpers e infraestructura consolidados de ps2_kernel.c, text utils y la suite sif
-s32  scePollSema(s32 sema_id);
-s32  sceSignalSema(s32 sema_id);
-u32  sys_strncpy_safe(u32 dest_addr, const char* src_addr, u32 max_len);
-s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
-
-extern s32 g_sys_mc_is_bound_flag;
-extern s32 g_sys_mc_mutex_sema_id;
-extern s32 g_sys_mc_active_command_id;
-extern u32 g_sys_mc_channel_widget_handle;
 
 /**
  * @brief Envía el comando de escaneo y listado de directorios de la Memory Card (Comando 2) al bus de hardware.
@@ -992,12 +736,6 @@ s32 sceMcGetDir(u32 slot_index, u32 context_val, const char* p_search_pattern, u
 	return is_busy_err;
 }
 
-// Referencia a tu función de listado de directorios ya integrada en esta misma suite
-s32 sceMcGetDir(u32 slot_index, u32 context_val, const char* p_search_pattern, u32 max_entries);
-
-// Variable global externa del guardián del canal
-extern s32 g_sys_mc_active_command_id;
-
 /**
  * @brief Envía el comando de verificación estructural y validación de formato de la Memory Card (Comando 11).
  * Envuelve a sceMcGetDir fijando el límite de entradas en 64 y enmascara el ID de comando activo a 0x0B.
@@ -1027,18 +765,6 @@ s32 sceMcCheckMc(u32 slot_index, u32 context_val, const char* p_dir_path) {
 #define MC_FORMAT_CLUSTERS_VAL      (*(s32*)0x00141C3C)
 #define MC_FORMAT_FAT_BUFFER_PTR    (*(u32*)0x00141C40)
 #define MC_FORMAT_PATTERN_BUFFER    ((u8*)0x00141C44)
-
-// Referencias a tus helpers e infraestructura consolidados de ps2_kernel.c, text utils y la suite sif
-s32  scePollSema(s32 sema_id);
-s32  sceSignalSema(s32 sema_id);
-u32  sys_strncpy_safe(u32 dest_addr, const char* src_addr, u32 max_len);
-void sys_kernel_flush_dcache_range(u32 start_addr, long block_size);
-s32  sys_sif_rpc_send_transaction_data(u32* p_session_handle, u32 command_id, u64 sync_flags, long src_addr, long src_size, long dest_addr, long dest_size, long p8, u32 extra_arg);
-
-extern s32 g_sys_mc_is_bound_flag;
-extern s32 g_sys_mc_mutex_sema_id;
-extern s32 g_sys_mc_active_command_id;
-extern u32 g_sys_mc_channel_widget_handle;
 
 /**
  * @brief Envía el comando de formateo e inicialización estructural de la Memory Card (Comando 0x0D) al bus de hardware.

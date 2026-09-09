@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdbool.h>
-#include <SDL2/SDL.h>
+#include <SDL.h>
 #include "graphics.h"
 #include "system.h"
 #include "ps2_kernel.h"
@@ -16,10 +16,11 @@ extern void Game_InitializeAllSystems(void);
 int main(int argc, char* argv[]) {
 	(void)argc; (void)argv; // Evitar advertencias de parámetros no usados
 
-	printf("[RAC2PC] Iniciando port nativo de Ratchet & Clank 2 (PAL)...\n");
+	LOG_INFO("CORE", "Iniciando port nativo de Ratchet & Clank 2 en Windows...");
 
 	// 1. Inicializar la capa del sistema de temporizadores y semáforos
 	Sys_InitGraphicsSemaphore();
+	LOG_SUCCESS("CORE", "Semáforos del sistema de renderizado levantados.");
 	Sys_InitRenderBuffers();
 
 	// 2. Configurar el entorno de pantalla moderno (Por defecto a 1080p, 60 FPS)
@@ -28,9 +29,11 @@ int main(int argc, char* argv[]) {
 
 	// 3. Inicializar el subsistema de video nativo de PC con SDL2
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) < 0) {
-		fprintf(stderr, "[ERROR] No se pudo inicializar SDL2: %s\n", SDL_GetError());
+		LOG_ERROR("SDL2", "Fallo al inicializar SDL: %s", SDL_GetError());
 		return -1;
 	}
+
+	LOG_SUCCESS("SDL2", "Subsistema de video y temporizadores listo.");
 
 	// Creamos la ventana de PC leyendo los valores modernos que inyectamos en tu estructura
 	g_MainWindow = SDL_CreateWindow(
@@ -56,10 +59,12 @@ int main(int argc, char* argv[]) {
 
 	// 4. Arrancar el código descompilado del juego
 	// Esto llamará a Graphics_InitSifInterface, cargar rom0:ROMVER (que ya puenteamos), etc.
-	printf("[RAC2PC] Saltando al bucle de inicialización del motor original...\n");
+	LOG_INFO("ENGINE", "Saltando al bucle de inicialización original (boot_init)...");
 
 	// Aquí el juego cargará la intro y correrá el lazo principal que sincronizamos con los semáforos
-	// Game_InitializeAllSystems();
+	//Game_InitializeAllSystems();
+
+	LOG_WARN("ENGINE", "El motor del juego retornó de forma inesperada. Entrando en bucle de emergencia de ventana.");
 
 	// 5. Bucle de ejecución de emergencia para mantener la ventana viva si el motor retorna
 	bool running = true;
@@ -76,7 +81,6 @@ int main(int argc, char* argv[]) {
 		SDL_RenderClear(g_MainRenderer);
 
 		// Aquí tu backend gráfico moderno dibujará el framebuffer escalado cuando conectemos el rasterizador
-
 		SDL_RenderPresent(g_MainRenderer);
 	}
 

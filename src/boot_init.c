@@ -112,47 +112,6 @@ extern s32 g_sys_mc_mutex_sema_id;
 extern s32 g_sys_mc_active_command_id;
 extern u32 g_sys_mc_channel_widget_handle;
 
-/**
- * @brief Interroga el estado físico y presencia de una tarjeta de memoria en la ranura especificada (Comando 3).
- * Dirección original en Ghidra: 0x00127668 (PAL)
- *
- * @param slot_index Índice de la ranura de la PS2 a consultar (0 = Ranura 1, 1 = Ranura 2) (param_1).
- * @return s32 Código de estado general (0 para transacción iniciada con éxito, valores negativos para error).
- */
-s32 sceMcGetInfo(u32 slot_index) {
-	s32 status_code;
-
-	// 1. Validar que el subsistema de la Memory Card esté formalmente levantado
-	if (g_sys_mc_is_bound_flag == 0) {
-		return -100;
-	}
-
-	// 2. Protege el bus realizando un sondeo no bloqueante sobre el semáforo del canal
-	long sema_status = (long)scePollSema(g_sys_mc_mutex_sema_id);
-	if (sema_status < 0) {
-		return -200; // El canal de la tarjeta está congestionado o bloqueado
-	}
-
-	// 3. Empaqueta el ID del slot e inyecta la orden mediante la ráfaga Comando 3 (Síncrona prioritaria = 1)
-	MC_SLOT_INPUT_BUFFER_PTR = slot_index;
-
-	status_code = sys_sif_rpc_send_transaction_data(
-		&g_sys_mc_channel_widget_handle,
-		3, 1, 0x141C00, 0x30, 0x143140, 4, 0, 0
-	);
-
-	// 4. Si la inyección en el bus SIF fue exitosa, firma el comando activo en la RAM
-	if (status_code == 0) {
-		g_sys_mc_active_command_id = 3;
-	}
-	else {
-		// En caso de falla en el pipeline, libera atómicamente el semáforo de exclusión mutua
-		sceSignalSema(g_sys_mc_mutex_sema_id);
-	}
-
-	return status_code;
-}
-
 // Referencias a tus componentes e infraestructura del Kernel y HUD perfectamente entrelazados
 s32  sceCreateSema(void);
 s32  sceWaitSema(s32 sema_id);
@@ -699,8 +658,8 @@ void sys_sif_submit_dma_packet_sync(u32 command_type, u32* p_packet_header, long
 void sys_hardware_keyboard_interrupt_handler(u64 expected_thread_id);
 
 // Referencias a tus funciones de sincronización del Kernel ya unificadas
-bool kernel_system_sync_guard(void);
-void kernel_system_sync_release(void);
+extern bool kernel_system_sync_guard(void);
+extern void kernel_system_sync_release(void);
 
 // Referencias a tus componentes del repositorio necesarios para la interconexión
 u32  hud_allocate_linear_node_slot(s32* p_master_alloc_struct);
@@ -1383,9 +1342,9 @@ int sys_sif_rpc_init_client(void) {
 }
 
 // Variables de estado del SIF simuladas para el port
-u8   g_sys_sif_is_initialized = 0;
-u32  g_sys_sif_handler_id = 0;
-u32  g_sys_sif_reg_status = 0;
+extern int  g_sys_sif_is_initialized;
+extern int  g_sys_sif_handler_id;
+extern int  g_sys_sif_reg_status;
 
 // Referencias a tus funciones de bajo nivel mapeadas en el laboratorio
 bool kernel_system_sync_guard(void);
@@ -1596,26 +1555,6 @@ u32 sys_io_queue_command_filter(u32 target_command_id, long p2, long p3, long p4
 
 // Definición del offset del comando activo en la RAM de la PS2
 #define IO_ACTIVE_COMMAND_ID        (*(u32*)0x001418C0)
-
-// Prototipos e implementaciones de tus funciones puente de sincronización del sistema
-/**
- * @brief Envoltorio del motor para suspender de forma segura las interrupciones del hilo de la CPU.
- * Dirección original en Ghidra: Variable según el sector de stubs (PAL)
- */
-bool kernel_system_sync_guard(void) {
-	// En la PS2 real esto ejecuta instrucciones assembly inline de MIPS.
-	// En PC moderno, funciona como el inicio de una zona crítica (Lock).
-	return true;
-}
-
-/**
- * @brief Envoltorio del motor para reanudar de forma segura las interrupciones de la CPU.
- * Dirección original en Ghidra: Variable según el sector de stubs (PAL)
- */
-void kernel_system_sync_release(void) {
-	// En PC emula la salida de la zona crítica (Unlock).
-	return;
-}
 
 // Referencia a tu guardián de comandos IO
 s32 sys_io_sync_command_guard(long command_type, long p2, long p3, long p4, long p5, long p6, long p7, long p8);

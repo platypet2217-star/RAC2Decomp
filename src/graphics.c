@@ -35,6 +35,7 @@ int g_GraphicsContextState = 0;           // Mapea DAT_0013ea08
 void* g_GraphicsStackBufferPtr = NULL;     // Mapea DAT_0013ea04
 
 unsigned long long sceGsDefDispEnv(unsigned long long* out_env, short mode_flags, short width, short height, short dx, short dy) {
+	LOG_SUCCESS("GRAPHICS", "Sintetizador Gráfico interceptado: %dx%d (Modo original: %d)", width, height, mode_flags);
 	if (out_env == NULL) return 0;
 
 	// 1. Ejecutamos los guardianes de sincronización que limpiamos en los pasos anteriores

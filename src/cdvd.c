@@ -24,7 +24,8 @@ int sceCdInit(int mode) {
 	// 3. Omitimos por completo los bucles 'while(true)' de apertura de sesión RPC SIF.
 	// En la PS2 real, esto se colgaba esperando al hardware físico.
 	// En PC, forzamos el estado de éxito instantáneo.
-	printf("[CDVD] Sistema de archivos mapeado correctamente. Modo original: %d\n", mode);
+	LOG_SUCCESS("CDVD", "Sistema de archivos mapeado correctamente. Modo original: %d\n", mode);
+	//printf("[CDVD] Sistema de archivos mapeado correctamente. Modo original: %d\n", mode);
 
 	// 4. Marcamos el subsistema como LISTO
 	g_CdvdNcmdInitialized = 0;
@@ -44,7 +45,7 @@ int sceCdStop(void) {
 	// Usamos el ID de I/O virtual simulado si lo tienes acoplado en ps2_kernel.c
 	// sceSignalSema(g_sys_io_lock_sema_id);
 
-	printf("[CDVD] Comando de reposo (Stop/Standby) procesado de forma nativa.\n");
+	LOG_INFO("CDVD", "Comando de reposo (Stop/Standby) procesado de forma nativa.\n");
 
 	return 0; // Retorno oficial del stub de Sony
 }
@@ -55,6 +56,8 @@ static FILE* g_CurrentWadFile = NULL;
 static char g_ActiveWadPath[256] = "";
 
 int sceCdRead(unsigned int sector_start, int sector_count, unsigned int dest_buffer, unsigned char* mode_struct) {
+	LOG_INFO("CDVD", "Solicitud de lectura: Sector inicial %u | Cantidad: %d sectores.", sector_start, sector_count);
+
 	sceCdStop();
 	sceCdInit(4);
 
@@ -88,12 +91,11 @@ int sceCdRead(unsigned int sector_start, int sector_count, unsigned int dest_buf
 		size_t bytes_read = fread(real_pc_destination, 1, bytes_to_read, g_CurrentWadFile);
 
 		if (bytes_read > 0) {
-			printf("[CDVD NATIVO] Leyendo desde: %s | %zu bytes cargados desde el sector %u.\n",
-				g_ActiveWadPath, bytes_read, sector_start);
+			LOG_SUCCESS("CDVD", "Leyendo desde: %s | %zu bytes cargados desde el sector %u.\n", g_ActiveWadPath, bytes_read, sector_start);
 			return 1; // Éxito de volcado en la RAM de PC
 		}
 	}
 
-	fprintf(stderr, "[ERROR CDVD] No se pudo leer el sector %u en la ruta local protegida.\n", sector_start);
+	LOG_ERROR("CDVD", "No se pudo leer el sector %u en la ruta local protegida.\n", sector_start);
 	return 0;
 }

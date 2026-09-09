@@ -1,8 +1,9 @@
-#include "types.h"
+#include "ps2_kernel.h"
 #include "system.h"     // Necesario para acceder a g_GraphicsSemaphore y g_GraphicsSemaphoreID
-#include <SDL2/SDL.h>
+#include <SDL.h>
 #include "graphics.h"   // Necesario para verificar target_fps
 #include <string.h>
+#include <stdlib.h>     // Requerido para atoi() en ee_atoi
 
 int ee_memcmp(const void* ptr1, const void* ptr2, size_t num) {
 	// En PC, la función estándar 'memcmp' de string.h está optimizada a nivel 
@@ -282,26 +283,6 @@ s32 sceReferThreadStatus(s32 thread_id, void* status_ptr) {
 }
 
 /**
- * @brief Vacía la caché de instrucciones (I-Cache) de la CPU para asegurar la coherencia antes de ejecutar código.
- * Dirección original en Ghidra: Sector de Stubs de Syscalls (100 MIPS Syscall) (PAL)
- *
- * @param cache_type Tipo de operación de vaciado (usualmente 0 para la I-Cache general).
- * @return s32 Código de estado del Kernel (0 para éxito).
- */
-s32 sceFlushCache(s32 cache_type) {
-#if defined(PLATFORM_PS2)
-	// En la PlayStation 2 real, esto se ejecuta mediante la instrucción inline:
-	// __asm__ volatile("li $v0, 100 \n syscall");
-	return 0;
-#else
-	// Para el port moderno a PC, el hardware x86_64/ARM maneja de forma automática 
-	// la coherencia de la caché de instrucciones sin necesidad de forzar flushes manuales:
-	(void)cache_type;
-	return 0;
-#endif
-}
-
-/**
  * @brief Recupera el identificador único (ID) del hilo de ejecución que se encuentra activo en el Kernel de la PS2.
  * Dirección original en Ghidra: Sector de Stubs de Syscalls (0x2F MIPS Syscall) (PAL)
  *
@@ -365,12 +346,104 @@ s32 sceSleepThread(void) {
 
 void sceFlushCache(int mode) {
 #if defined(PLATFORM_PS2)
-	// En la consola real invoca la syscall 0x80
-	// __asm__ volatile("li $v0, 128 \n syscall"); 
+	// En la consola real invoca la syscall 100 (0x64) del Kernel de la PS2.
+	// __asm__ volatile("li $v0, 100 \n syscall");
 #else
 	// Para PC moderno, los procesadores x86_64/ARM manejan la coherencia de 
 	// caché por hardware automáticamente. Dejamos esta función vacía de forma 
 	// segura para no penalizar el rendimiento ni exigir componentes innecesariamente.
 	(void)mode;
 #endif
+}
+
+// 1. Simulación de la función del menú principal y ciclo de la intro
+void game_main_menu_and_intro_loop(void) {
+	// Aquí es donde eventualmente se quedará enganchado el bucle lúdico principal
+}
+
+// 2. Simulación de registros de la SDK de Sony
+uint32_t sceSifGetReg(void) {
+	return 1; // Devolvemos 1 para simular que el coprocesador IOP respondió al saludo
+}
+
+// 3. Simulación de retrasos de temporizador de hardware (Equivalente nativo a nanosleep en Windows)
+void nanosleep(void* req, void* rem) {
+	// En Windows se simula de forma ultra-precisa usando las herramientas nativas:
+	// (Puedes dejarlo vacío o mapearlo con un sub-retraso si el motor lo exige)
+	(void)req; (void)rem;
+}
+
+// 4. Decodificador de caracteres personalizados del HUD (Para el conversor de texto extendido)
+void custom_hud_glyph_decoder(void* param_1, void* param_2) {
+	(void)param_1; (void)param_2;
+}
+
+// 5. Variables y stubs del subsistema de la Tarjeta de Memoria (Memory Card - sceMc)
+// El juego consulta el estado de la tarjeta antes de cargar la intro. Las creamos vacías:
+int g_sys_mc_is_bound_flag = 0;
+int g_sys_mc_mutex_sema_id = -1;
+int g_sys_mc_active_command_id = 0;
+int g_sys_mc_channel_widget_handle = 0;
+
+int sceMcGetInfo(int channel, int slot, void* type, void* free, void* format) {
+	(void)channel; (void)slot; (void)type; (void)free; (void)format;
+	return 0; // Devolvemos 0 (Tarjeta de memoria no insertada o simulada pasivamente)
+}
+
+// ============================================================================
+// STUBS FINALES DE PLATAFORMA PARA CIERRE DE ENLAZADO (PC PORT)
+// ============================================================================
+
+// 1. Variables globales del sistema de Entrada/Salida (I/O) y Sonido del IOP
+int g_sys_io_wait_sema_id = -1;
+int g_sys_io_queue_lock_flag = 0;
+int g_sys_sound_channel_widget_handle = 0;
+int g_sys_io_reconfig_flag = 0;
+
+// 2. Funciones de control de interrupciones físicas del chip Emotion Engine (MIPS)
+// En PC no hay registros de interrupción de hardware directo; devolvemos éxito inmediato.
+int DI(void) { return 0; }
+int EI(void) { return 0; }
+int SYNC(void) { return 0; }
+int Status(void) { return 0; }
+
+// 3. Variables de control del inicializador de la tabla de paginación de hardware (TLB)
+// El juego limpia la TLB original al arrancar la RAM. En PC creamos los índices ficticios:
+int g_tlb_wired_index = 0;
+int g_tlb_bound_index = 0;
+int g_tlb_status_sync = 0;
+int g_tlb_extra_flags = 0;
+
+// 4. Función de sincronización del paquete gráfico del bus de la PS2
+void ps2_sync(void) {
+	// En la PS2 real, esto esperaba que el bus GIF/VIF se vaciara. 
+	// En PC, al procesarse de forma síncrona en el hilo, es una operación instantánea.
+}
+
+// ============================================================================
+// STUBS FINALES ABSOLUTOS DE ENTRADA/SALIDA Y MEMORY CARD (PC PORT)
+// ============================================================================
+
+// 1. Variables del estado de lectura del sistema de archivos de la PS2
+int g_sys_io_is_ready_flag = 1; // 1 = El lector virtual siempre está listo en PC
+int g_sys_io_lock_sema_id = -1;
+int g_sys_io_dma_sema_id = -1;
+
+// 2. Descriptores de archivo y tamaños del subsistema de Tarjeta de Memoria (sceMc)
+// El motor los utiliza para guardar/cargar partidas. Los inicializamos en cero seguros.
+int g_sys_mc_read_fd = -1;
+int g_sys_mc_read_size = 0;
+int g_sys_mc_write_fd = -1;
+void* g_sys_mc_write_src_ptr = NULL;
+int g_sys_mc_write_size = 0;
+
+// 3. Stubs complementarios para llamadas de tarjeta de memoria detectadas en ps2_sif
+int sceMcChdir(int channel, int slot, const char* path, char* current_dir) {
+	(void)channel; (void)slot; (void)path; (void)current_dir;
+	return 0;
+}
+
+int sceMcWriteExtended(int channel, int slot, const char* filename, void* buffer, int size) {
+	(void)channel; (void)slot; (void)filename; (void)buffer; (void)size;
+	return 0;
 }

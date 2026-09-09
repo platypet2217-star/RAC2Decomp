@@ -1,40 +1,49 @@
+// src/ps2_kernel.h
 #ifndef PS2_KERNEL_H
 #define PS2_KERNEL_H
 
-#include <stddef.h>
-#include <stdbool.h>
+#include "types.h"
+#include <stddef.h> // size_t
 
-// Mapeamos los tipos estándar que usa la PS2 (Ajusta si usas int o typedefs propios)
-typedef int s32;
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-/**
- * @brief Consulta el estado actual de un hilo de ejecución específico en el Kernel de la PS2.
- */
-s32 sceReferThreadStatus(s32 thread_id, void* status_ptr);
-void sceFlushCache(int mode);
-
-/**
- * @brief Compara dos bloques de memoria de forma fiel a la optimización de PS2.
- * @return 0 si son iguales, o la diferencia entre los primeros bytes que difieren.
- */
+/* ------------------------------------------------------------------------
+ * Utilidades de bajo nivel del Emotion Engine (equivalentes a funciones de
+ * libc, reimplementadas para dejar explícito que sustituyen a la versión
+ * nativa de la PS2).
+ * ------------------------------------------------------------------------ */
 int ee_memcmp(const void* ptr1, const void* ptr2, size_t num);
-
-// ... Mantener lo anterior ...
-
-/**
- * @brief Convierte una cadena de caracteres en un número entero decimal.
- * @param str Puntero a la cadena de texto a convertir.
- * @return El valor entero resultante de la conversión.
- */
 int ee_atoi(const char* str);
 
-// ... Mantener lo anterior ...
+/* ------------------------------------------------------------------------
+ * Semáforos del Kernel de la PS2 (o su emulación con SDL2 en el port a PC).
+ * ------------------------------------------------------------------------ */
+s32 sceCreateSema(void);
+s32 sceWaitSema(s32 sema_id);
+s32 sceSignalSema(s32 sema_id);
+s32 iSignalSema(s32 sema_id);
+s32 scePollSema(s32 sema_id);
+s32 sceDeleteSema(s32 sema_id);
 
-/**
- * @brief Vaciado manual del caché de la CPU (Emotion Engine).
- * @note En PC nativo es una operación nula (NOP) debido a la coherencia de hardware moderna.
- * @param mode El modo de vaciado (Originalmente 0 = Instruction & Data Cache).
- */
-void sceFlushCache(int mode);
+/* ------------------------------------------------------------------------
+ * Hilos del Kernel de la PS2.
+ * ------------------------------------------------------------------------ */
+s32 sceWakeupThread(s32 thread_id);
+s32 iWakeupThread(s32 thread_id);
+s32 sceReferThreadStatus(s32 thread_id, void* status_ptr);
+s32 sceGetThreadId(void);
+s32 sceSleepThread(void);
 
+/* ------------------------------------------------------------------------
+ * Alarmas, caché y otras utilidades del Kernel.
+ * ------------------------------------------------------------------------ */
+s32  sceSetAlarm(u32 microseconds, void* alarm_callback, void* callback_arg);
+void sceFlushCache(int mode); // Modos reales del SDK: WRITEBACK_DCACHE=0, INVALIDATE_DCACHE=1, INVALIDATE_ICACHE=2, INVALIDATE_CACHE=3
+
+#ifdef __cplusplus
+}
 #endif
+
+#endif // PS2_KERNEL_H
