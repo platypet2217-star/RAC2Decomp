@@ -344,18 +344,6 @@ s32 sceSleepThread(void) {
 #endif
 }
 
-void sceFlushCache(int mode) {
-#if defined(PLATFORM_PS2)
-	// En la consola real invoca la syscall 100 (0x64) del Kernel de la PS2.
-	// __asm__ volatile("li $v0, 100 \n syscall");
-#else
-	// Para PC moderno, los procesadores x86_64/ARM manejan la coherencia de 
-	// caché por hardware automáticamente. Dejamos esta función vacía de forma 
-	// segura para no penalizar el rendimiento ni exigir componentes innecesariamente.
-	(void)mode;
-#endif
-}
-
 // 1. Simulación de la función del menú principal y ciclo de la intro
 void game_main_menu_and_intro_loop(void) {
 	// Aquí es donde eventualmente se quedará enganchado el bucle lúdico principal

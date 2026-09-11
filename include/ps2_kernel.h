@@ -40,7 +40,6 @@ s32 sceSleepThread(void);
  * Alarmas, caché y otras utilidades del Kernel.
  * ------------------------------------------------------------------------ */
 s32  sceSetAlarm(u32 microseconds, void* alarm_callback, void* callback_arg);
-void sceFlushCache(int mode); // Modos reales del SDK: WRITEBACK_DCACHE=0, INVALIDATE_DCACHE=1, INVALIDATE_ICACHE=2, INVALIDATE_CACHE=3
 
 #ifdef __cplusplus
 }
