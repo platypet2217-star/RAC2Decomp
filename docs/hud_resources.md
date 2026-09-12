@@ -29,6 +29,36 @@ This document lists the RAM addresses of the text strings and mathematical const
 | :--- | :--- | :--- | :--- |
 | **`0x0013A388`** | `uint32_t[]` (Array) | `_ctype_b_ptr_array` | Array of location pointers. The first index (`0x0013A388`) points directly to `0x0013A3C0`, which contains the actual array of ASCII property bitmasks (digits, spaces, letters) used by `ee_strtoll`. |
 
+## Main HUD Canvas Segment (0x001AE6D8 - 0x001AE700)
+
+| Memory Address | Data Type | Commercial Value / String | Purpose / Intended Use in the Engine |
+| :--- | :--- | :--- | :--- |
+| **`0x001AE6D8`** | `char[]` (String) | `“HudBase”` / `“HudCanvas”`| Invisible master container or base coordinate canvas for the HUD. |
+| **`0x001AE6E8`** | `char[]` (String) | `“HealthBarOutline”`| Aesthetic outline resource for the health meter (Nanotech). |
+| **`0x001AE6F8`** | `char[]` (String) | `“HealthBarFill”`   | Visual resource for the dynamic fill of the Nanotech bar. |
+
+## Core Signs and Gauges Initialization Segment (0x001AE700 - 0x001AE755)
+
+| Memory Address | Data Type | Value / String | Purpose / Estimated Use in the Engine |
+| :--- | :--- | :--- | :--- |
+| **`0x001AE700`** | `char[]` (String) | `“WeaponName”` / `“AmmoText”` | Dynamic text displaying the weapon name or the number of bullets on the HUD. |
+| **`0x001AE710`** | `char[]` (String) | `“WeaXP”` | Visual component of the level or experience bar for the weapon in use. |
+| **`0x001AE720`** | `char[]` (String) | `“AmmoIcon”` | Main texture or outline of the bullet/projectile for the selected weapon. |
+| **`0x001AE730`** | `char[]` (String) | `“AmmoIconBack”` | Background or contrast shadow for the ammunition icon. |
+| **`0x001AE740`** | `char[]` (String) | `“BoltText”` | Numeric label that displays the accumulated amount of guitones (wallet). |
+
+## Dynamic Templates for the Quick Select Radial Menu (0x001AE075 - 0x001AE090)
+
+| Memory Address | Data Type | Commercial Value / String | Purpose / Intended Use in the Engine |
+| :--- | :--- | :--- | :--- |
+| **`0x001AE078`** | `char[]` (String) | `“QSelIcon”` | Central base icon for the quick weapon selection menu. |
+| **`0x001AE088`** | `char[]` (String) | `“QSelBI%d”` | Text mask formatted by vsnprintf to initialize the radial inventory slots in burst mode. |
+
+
+| Memory Address | Data Type | Commercial Value / String | Purpose / Intended Use in the Engine |
+| :--- | :--- | :--- | :--- |
+| **`0x001AE098`** | `char[]` (String) | `“QSelIco%d”` | Dynamic template used by vsnprintf to initialize the weapon icon textures within each slot of the radial menu. |
+
 # Español
 
 # Registro de Recursos Estáticos del HUD - Ratchet & Clank 2 (PAL)
@@ -67,9 +97,6 @@ Este documento centraliza las direcciones de memoria RAM de cadenas de texto (st
 | **`0x001AE6D8`** | `char[]` (String) | `"HudBase"` / `"HudCanvas"`| Contenedor invisible maestro o lienzo base de coordenadas del HUD. |
 | **`0x001AE6E8`** | `char[]` (String) | `"HealthBarOutline"`| Recurso del contorno estético del medidor de vida (Nanotech). |
 | **`0x001AE6F8`** | `char[]` (String) | `"HealthBarFill"`   | Recurso visual del relleno dinámico de la barra de Nanotech. |
-
-
-# Se debe limpiar lo de abajo, después lo arreglo xD
 
 ## Segmento de Inicialización de Letreros y Medidores del Core (0x001AE700 - 0x001AE755)
 
