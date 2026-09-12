@@ -20,7 +20,6 @@ int ee_atoi(const char* str);
 /* ------------------------------------------------------------------------
  * Semáforos del Kernel de la PS2 (o su emulación con SDL2 en el port a PC).
  * ------------------------------------------------------------------------ */
-s32 sceCreateSema(void);
 s32 sceWaitSema(s32 sema_id);
 s32 sceSignalSema(s32 sema_id);
 s32 iSignalSema(s32 sema_id);

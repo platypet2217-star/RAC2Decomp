@@ -29,30 +29,6 @@ static PS2_Simulated_Semaphore g_virtual_semaphores[16] = {
 #endif
 
 /**
- * @brief Reserva y crea un nuevo objeto semáforo en el Kernel de la PlayStation 2...
- */
-s32 sceCreateSema(void) {
-#if defined(PLATFORM_PS2)
-	// En la consola real, se invoca mediante ensamblador inline:
-	// __asm__ volatile("li $v0, 64 \n syscall");
-	return 0;
-#else
-	// Para el port a PC, emulamos la asignación devolviendo un ID autoincremental
-	static s32 virtual_sema_counter = 4;
-	s32 nuevo_id = virtual_sema_counter++;
-
-	// Si el sistema gráfico aún no ha inicializado su semáforo, 
-	// aprovechamos esta primera llamada para enlazar el ID moderno.
-	if (g_GraphicsSemaphoreID == SYS_SEMAPHORE_INVALID) {
-		g_GraphicsSemaphore = SDL_CreateSemaphore(0);
-		g_GraphicsSemaphoreID = nuevo_id;
-	}
-
-	return nuevo_id;
-#endif
-}
-
-/**
  * @brief Pausa la ejecución del hilo actual en el Kernel de la PS2...
  */
 s32 sceWaitSema(s32 sema_id) {
